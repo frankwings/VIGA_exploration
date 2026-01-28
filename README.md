@@ -108,7 +108,7 @@ Edit `utils/_path.py` to set your conda installation path. By default, it points
 
 ```bash
 conda activate agent
-python runners/dynamic_scene.py --task=artist --model=gpt-5
+python runners/dynamic_scene.py --task=artist --model=gpt-5 --generator-tools=tools/blender/exec.py,tools/generator_base.py,tools/initialize_plan.py,tools/sam3d/init.py
 ```
 
 Custom data: place in `data/dynamic_scene/<your-data-name>` following the format in `data/dynamic_scene/artist`.
