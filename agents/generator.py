@@ -13,7 +13,7 @@ from openai import OpenAI
 from agents.prompt_builder import PromptBuilder
 from agents.tool_client import ExternalToolClient
 from agents.verifier import VerifierAgent
-from utils.common import get_image_base64, get_model_response, tournament_select_best
+from utils.common import get_image_base64, get_model_response, tournament_select_best, parse_groq_tool_call
 
 class GeneratorAgent:
     """Agent responsible for generating and refining code based on visual targets.
@@ -100,7 +100,15 @@ class GeneratorAgent:
             
             # Handle tool call
             print("Handle tool call...")
-            if not message.tool_calls and not self.config.get("no_tools"):
+            
+            # Check for Groq's malformed tool call format in content
+            parsed_tool_call = None
+            if not message.tool_calls and message.content:
+                parsed_tool_call = parse_groq_tool_call(message.content)
+                if parsed_tool_call:
+                    print(f"Parsed Groq tool call: {parsed_tool_call['name']}")
+            
+            if not message.tool_calls and not parsed_tool_call and not self.config.get("no_tools"):
                 if message.content != '':
                     self.memory.append({"role": "assistant", "content": message.content})
                 else:
@@ -133,10 +141,15 @@ class GeneratorAgent:
                     verifier_result = await self.verifier.run({"argument": json_content, "execution": tool_response})
                     tool_response['verifier_result'] = verifier_result
             else:
-                tool_call = message.tool_calls[0]
-                tool_name = tool_call.function.name
+                # Use parsed tool call (for Groq) or native tool_calls
+                if parsed_tool_call:
+                    tool_name = parsed_tool_call['name']
+                    tool_arguments = parsed_tool_call['arguments']
+                else:
+                    tool_call = message.tool_calls[0]
+                    tool_name = tool_call.function.name
+                    tool_arguments = json.loads(tool_call.function.arguments)
                 print(f"Call tool {tool_name}...")
-                tool_arguments = json.loads(tool_call.function.arguments)
                     
                 tool_response = await self.tool_client.call_tool(tool_name, tool_arguments)
                 if tool_name == "get_better_object":

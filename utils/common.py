@@ -25,6 +25,47 @@ from utils._api_keys import (
     VA_API_KEY,
 )
 
+import re
+
+
+def parse_groq_tool_call(content: str) -> Optional[Dict[str, Any]]:
+    """Parse Groq's malformed tool call format.
+    
+    Groq's Llama models sometimes generate tool calls as:
+    <function=tool_name={"arg": "value"}>
+    
+    This function extracts the tool name and arguments.
+    
+    Args:
+        content: The response content that may contain a malformed tool call.
+        
+    Returns:
+        Dictionary with 'name' and 'arguments' keys, or None if not found.
+    """
+    if not content:
+        return None
+    
+    # Pattern: <function=name=json_args> or <function=name json_args>
+    patterns = [
+        r'<function=(\w+)=(\{.*\})>?',  # <function=name={"key": "value"}>
+        r'<function=(\w+)\s+(\{.*\})>?',  # <function=name {"key": "value"}>
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, content, re.DOTALL)
+        if match:
+            tool_name = match.group(1)
+            try:
+                # Clean up the JSON - remove trailing >
+                args_str = match.group(2).rstrip('>')
+                arguments = json.loads(args_str)
+                return {"name": tool_name, "arguments": arguments}
+            except json.JSONDecodeError:
+                continue
+    
+    return None
+
+
 def get_model_response(client: OpenAI, chat_args: Dict, num_candidates: int) -> List[Any]:
     """Get model responses with retry logic.
 

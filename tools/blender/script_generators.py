@@ -17,6 +17,8 @@ def generate_scene_info_script(output_path: str) -> str:
     Returns:
         Blender Python script as a string.
     """
+    # Normalize path to use forward slashes to avoid escape sequence issues
+    output_path = output_path.replace('\\', '/')
     return f'''import bpy
 import json
 import sys
@@ -140,6 +142,7 @@ def generate_camera_focus_script(object_name: str, base_path: str) -> str:
     Returns:
         Blender Python script as a string.
     """
+    base_path = base_path.replace('\\', '/')
     return f'''import bpy
 import json
 import math
@@ -223,6 +226,7 @@ def generate_camera_set_script(location: List[float], rotation_euler: List[float
     Returns:
         Blender Python script as a string.
     """
+    base_path = base_path.replace('\\', '/')
     return f'''import bpy
 import json
 import os
@@ -277,6 +281,7 @@ def generate_visibility_script(show_objects: List[str], hide_objects: List[str],
     Returns:
         Blender Python script as a string.
     """
+    base_path = base_path.replace('\\', '/')
     return f'''import bpy
 import json
 import os
@@ -330,6 +335,7 @@ def generate_camera_move_script(target_obj_name: str, radius: float, theta: floa
     Returns:
         Blender Python script as a string.
     """
+    base_path = base_path.replace('\\', '/')
     return f'''import bpy
 import json
 import math
@@ -391,6 +397,7 @@ def generate_keyframe_script(frame_number: int, base_path: str) -> str:
     Returns:
         Blender Python script as a string.
     """
+    base_path = base_path.replace('\\', '/')
     return f'''import bpy
 import json
 import os
@@ -437,6 +444,7 @@ def generate_viewpoint_script(object_names: List[str], base_path: str) -> str:
     Returns:
         Blender Python script as a string.
     """
+    base_path = base_path.replace('\\', '/')
     return f'''import bpy
 import json
 import math

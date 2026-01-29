@@ -141,11 +141,12 @@ class Executor:
             Tuple of (success, image_paths, stdout, stderr).
         """
         # Use list-based command (no shell=True) for reliable execution
+        # Use "NONE" as placeholder for empty render_path (empty string gets dropped on Windows)
         cmd = [
             self.blender_command,
             "--background", self.blender_file,
             "--python", self.blender_script,
-            "--", script_path, render_path
+            "--", script_path, render_path if render_path else "NONE"
         ]
         if self.blender_save:
             cmd.append(self.blender_save)
@@ -162,9 +163,28 @@ class Executor:
         
         try:
             logging.info(f"Running Blender: {cmd}")
-            proc = subprocess.run(cmd, check=True, capture_output=True, text=True, env=env, timeout=300)
-            out = proc.stdout
-            err = proc.stderr
+            # Write output to temp files to avoid pipe deadlocks on Windows
+            import sys
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='_stdout.txt', delete=False) as f_out, \
+                 tempfile.NamedTemporaryFile(mode='w', suffix='_stderr.txt', delete=False) as f_err:
+                stdout_file, stderr_file = f_out.name, f_err.name
+            
+            with open(stdout_file, 'w') as f_out, open(stderr_file, 'w') as f_err:
+                if sys.platform == "win32":
+                    cmd_str = ' '.join(f'"{c}"' if ' ' in c else c for c in cmd)
+                    proc = subprocess.run(cmd_str, shell=True, check=True, stdin=subprocess.DEVNULL, stdout=f_out, stderr=f_err, env=env, timeout=300)
+                else:
+                    proc = subprocess.run(cmd, check=True, stdin=subprocess.DEVNULL, stdout=f_out, stderr=f_err, env=env, timeout=300)
+            
+            with open(stdout_file, 'r') as f:
+                out = f.read()
+            with open(stderr_file, 'r') as f:
+                err = f.read()
+            
+            # Cleanup temp files
+            os.unlink(stdout_file)
+            os.unlink(stderr_file)
             if os.path.isdir(render_path):
                 imgs = sorted([str(p) for p in Path(render_path).glob("*") if p.suffix in ['.png','.jpg']])
                 if len(imgs) > 0:

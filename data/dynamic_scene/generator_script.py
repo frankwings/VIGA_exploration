@@ -7,7 +7,8 @@ if __name__ == "__main__":
 
     # ---- Command line arguments ----
     code_fpath = sys.argv[6]  # Path to scene generation/editing code
-    if len(sys.argv) > 7:
+    # "NONE" is used as placeholder for empty render_path on Windows
+    if len(sys.argv) > 7 and sys.argv[7] and sys.argv[7] != "NONE":
         rendering_dir = sys.argv[7]  # Rendering output directory
     else:
         rendering_dir = None
