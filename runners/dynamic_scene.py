@@ -129,9 +129,11 @@ def run_dynamic_scene_task(task_config: Dict, args: argparse.Namespace) -> Tuple
     if os.path.exists(args.blender_file):
         shutil.copy(args.blender_file, created_blender_file)
     else:
+        # Use forward slashes for Windows compatibility in Python strings
+        safe_blend_path = created_blender_file.replace('\\', '/')
         create_empty_blend_cmd = (
-            f"{args.blender_command} --background --factory-startup "
-            f"--python-expr \"import bpy; bpy.ops.wm.read_factory_settings(use_empty=True); bpy.ops.wm.save_mainfile(filepath='" + created_blender_file + "')\""
+            f'"{args.blender_command}" --background --factory-startup '
+            f'--python-expr "import bpy; bpy.ops.wm.read_factory_settings(use_empty=True); bpy.ops.wm.save_mainfile(filepath=\'{safe_blend_path}\')"'
         )
         subprocess.run(create_empty_blend_cmd, shell=True, check=True)
     

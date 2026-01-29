@@ -47,7 +47,7 @@ if __name__ == "__main__":
     scene = bpy.context.scene
     scene.render.resolution_x = 512
     scene.render.resolution_y = 512
-    scene.cycles.samples = 512
+    scene.cycles.samples = 32  # Reduced for faster testing
     scene.render.image_settings.color_mode = 'RGB'
     scene.render.image_settings.file_format = 'PNG'
     scene.render.use_file_extension = True
