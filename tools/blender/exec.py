@@ -140,21 +140,16 @@ class Executor:
         Returns:
             Tuple of (success, image_paths, stdout, stderr).
         """
-        # Normalize all paths to use forward slashes for Windows compatibility
-        blender_file = self.blender_file.replace('\\', '/')
-        blender_script = self.blender_script.replace('\\', '/')
-        script_path_norm = script_path.replace('\\', '/')
-        render_path_norm = render_path.replace('\\', '/')
-        
+        # Use list-based command (no shell=True) for reliable execution
         cmd = [
-            f'"{self.blender_command}"',
-            "--background", blender_file,
-            "--python", blender_script,
-            "--", script_path_norm, render_path_norm
+            self.blender_command,
+            "--background", self.blender_file,
+            "--python", self.blender_script,
+            "--", script_path, render_path
         ]
         if self.blender_save:
-            cmd.append(self.blender_save.replace('\\', '/'))
-        cmd_str = " ".join(cmd)
+            cmd.append(self.blender_save)
+        logging.info(f"Blender command: {' '.join(cmd)}")
         
         # Set environment variables to control GPU devices
         env = os.environ.copy()
@@ -166,7 +161,8 @@ class Executor:
         env['AL_LIB_LOGLEVEL'] = '0'
         
         try:
-            proc = subprocess.run(cmd_str, shell=True, check=True, capture_output=True, text=True, env=env)
+            logging.info(f"Running Blender: {cmd}")
+            proc = subprocess.run(cmd, check=True, capture_output=True, text=True, env=env, timeout=300)
             out = proc.stdout
             err = proc.stderr
             if os.path.isdir(render_path):
