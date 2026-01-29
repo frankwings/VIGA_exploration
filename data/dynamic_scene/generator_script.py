@@ -28,20 +28,8 @@ if __name__ == "__main__":
         print("[INFO] No rendering directory provided, skipping rendering.")
         exit(0)
 
-    bpy.context.scene.render.engine = 'CYCLES'
-    try:
-        prefs = bpy.context.preferences.addons['cycles'].preferences
-        # Optional: 'CUDA' or 'OPTIX' depending on GPU support
-        prefs.compute_device_type = 'CUDA'
-        prefs.get_devices()
-        # Select all GPU devices
-        for device in prefs.devices:
-            if device.type == 'GPU':
-                device.use = True
-        bpy.context.scene.cycles.device = 'GPU'
-    except Exception:
-        # Fall back to CPU if no GPU or setup fails
-        bpy.context.scene.cycles.device = 'CPU'
+    # Use EEVEE for faster rendering (good enough for preview)
+    bpy.context.scene.render.engine = 'BLENDER_EEVEE_NEXT'
 
     # ---- Basic render parameters ----
     scene = bpy.context.scene

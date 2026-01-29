@@ -140,14 +140,20 @@ class Executor:
         Returns:
             Tuple of (success, image_paths, stdout, stderr).
         """
+        # Normalize all paths to use forward slashes for Windows compatibility
+        blender_file = self.blender_file.replace('\\', '/')
+        blender_script = self.blender_script.replace('\\', '/')
+        script_path_norm = script_path.replace('\\', '/')
+        render_path_norm = render_path.replace('\\', '/')
+        
         cmd = [
-            self.blender_command,
-            "--background", self.blender_file,
-            "--python", self.blender_script,
-            "--", script_path, render_path
+            f'"{self.blender_command}"',
+            "--background", blender_file,
+            "--python", blender_script,
+            "--", script_path_norm, render_path_norm
         ]
         if self.blender_save:
-            cmd.append(self.blender_save)
+            cmd.append(self.blender_save.replace('\\', '/'))
         cmd_str = " ".join(cmd)
         
         # Set environment variables to control GPU devices

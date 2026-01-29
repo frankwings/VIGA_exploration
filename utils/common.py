@@ -16,6 +16,8 @@ from utils._api_keys import (
     CLAUDE_BASE_URL,
     GEMINI_API_KEY,
     GEMINI_BASE_URL,
+    GROQ_API_KEY,
+    GROQ_BASE_URL,
     MESHY_API_KEY,
     OPENAI_API_KEY,
     OPENAI_BASE_URL,
@@ -41,15 +43,21 @@ def get_model_response(client: OpenAI, chat_args: Dict, num_candidates: int) -> 
     # select the best candidate from the responses
     candidate_responses = []
     for idx in range(num_candidates):
-        max_retries = 1
+        max_retries = 5  # Increased retries for rate limiting
+        retry_delay = 30  # Start with 30 second delay
         while max_retries > 0:
             try:
                 response = client.chat.completions.create(**chat_args)
                 candidate_responses.append(response)
                 break
             except Exception as e:
+                logging.error(f"API call failed: {e}")
+                logging.error(f"Chat args model: {chat_args.get('model')}")
                 max_retries -= 1
-                time.sleep(10)
+                if max_retries > 0:
+                    logging.info(f"Retrying in {retry_delay}s... ({max_retries} retries left)")
+                    time.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 1.5, 120)  # Exponential backoff, max 2 min
     if len(candidate_responses) == 0:
         raise Exception("Failed to get model response")
     return candidate_responses
@@ -63,6 +71,8 @@ def build_client(model_name: str) -> OpenAI:
         return OpenAI(api_key=CLAUDE_API_KEY, base_url=CLAUDE_BASE_URL)
     elif "gemini" in model_name:
         return OpenAI(api_key=GEMINI_API_KEY, base_url=GEMINI_BASE_URL)
+    elif "groq" in model_name or "llama" in model_name or "mixtral" in model_name:
+        return OpenAI(api_key=GROQ_API_KEY, base_url=GROQ_BASE_URL)
     elif "qwen" in model_name:
         return OpenAI(api_key='not_used', base_url=QWEN_BASE_URL)
     else:
@@ -77,6 +87,8 @@ def get_model_info(model_name: str) -> Dict[str, str]:
         return {"api_key": CLAUDE_API_KEY, "base_url": CLAUDE_BASE_URL}
     elif "gemini" in model_name:
         return {"api_key": GEMINI_API_KEY, "base_url": GEMINI_BASE_URL}
+    elif "groq" in model_name or "llama" in model_name or "mixtral" in model_name:
+        return {"api_key": GROQ_API_KEY, "base_url": GROQ_BASE_URL}
     elif "qwen" in model_name:
         return {"api_key": 'not_used', "base_url": QWEN_BASE_URL}
     else:
