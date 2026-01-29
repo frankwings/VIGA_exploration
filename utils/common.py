@@ -112,7 +112,7 @@ def build_client(model_name: str) -> OpenAI:
         return OpenAI(api_key=CLAUDE_API_KEY, base_url=CLAUDE_BASE_URL)
     elif "gemini" in model_name:
         return OpenAI(api_key=GEMINI_API_KEY, base_url=GEMINI_BASE_URL)
-    elif "groq" in model_name or "llama" in model_name or "mixtral" in model_name:
+    elif "groq" in model_name or "llama" in model_name or "mixtral" in model_name or "meta-llama" in model_name:
         return OpenAI(api_key=GROQ_API_KEY, base_url=GROQ_BASE_URL)
     elif "qwen" in model_name:
         return OpenAI(api_key='not_used', base_url=QWEN_BASE_URL)
@@ -128,7 +128,7 @@ def get_model_info(model_name: str) -> Dict[str, str]:
         return {"api_key": CLAUDE_API_KEY, "base_url": CLAUDE_BASE_URL}
     elif "gemini" in model_name:
         return {"api_key": GEMINI_API_KEY, "base_url": GEMINI_BASE_URL}
-    elif "groq" in model_name or "llama" in model_name or "mixtral" in model_name:
+    elif "groq" in model_name or "llama" in model_name or "mixtral" in model_name or "meta-llama" in model_name:
         return {"api_key": GROQ_API_KEY, "base_url": GROQ_BASE_URL}
     elif "qwen" in model_name:
         return {"api_key": 'not_used', "base_url": QWEN_BASE_URL}
