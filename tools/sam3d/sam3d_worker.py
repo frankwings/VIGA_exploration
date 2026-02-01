@@ -12,7 +12,83 @@ import sys
 
 import numpy as np
 import torch
-from pytorch3d.transforms import Transform3d, quaternion_to_matrix
+
+# Pure PyTorch replacements for pytorch3d functions
+def quaternion_to_matrix(quaternions: torch.Tensor) -> torch.Tensor:
+    """Convert rotations given as quaternions to rotation matrices.
+    
+    Args:
+        quaternions: quaternions with real part first, shape (..., 4).
+    
+    Returns:
+        Rotation matrices, shape (..., 3, 3).
+    """
+    r, i, j, k = torch.unbind(quaternions, -1)
+    two_s = 2.0 / (quaternions * quaternions).sum(-1)
+    
+    o = torch.stack(
+        (
+            1 - two_s * (j * j + k * k),
+            two_s * (i * j - k * r),
+            two_s * (i * k + j * r),
+            two_s * (i * j + k * r),
+            1 - two_s * (i * i + k * k),
+            two_s * (j * k - i * r),
+            two_s * (i * k - j * r),
+            two_s * (j * k + i * r),
+            1 - two_s * (i * i + j * j),
+        ),
+        -1,
+    )
+    return o.reshape(quaternions.shape[:-1] + (3, 3))
+
+
+class Transform3d:
+    """Simple Transform3d replacement using pure PyTorch."""
+    
+    def __init__(self, dtype=torch.float32, device="cpu"):
+        self.dtype = dtype
+        self.device = device
+        self._matrix = torch.eye(4, dtype=dtype, device=device)
+    
+    def scale(self, scale):
+        if isinstance(scale, (int, float)):
+            scale = torch.tensor([scale, scale, scale], dtype=self.dtype, device=self.device)
+        elif isinstance(scale, torch.Tensor) and scale.numel() == 1:
+            scale = scale.expand(3)
+        S = torch.eye(4, dtype=self.dtype, device=self.device)
+        S[0, 0] = scale[0] if len(scale.shape) == 1 else scale
+        S[1, 1] = scale[1] if len(scale.shape) == 1 else scale
+        S[2, 2] = scale[2] if len(scale.shape) == 1 else scale
+        self._matrix = self._matrix @ S
+        return self
+    
+    def rotate(self, R):
+        if R.shape == (3, 3):
+            R4 = torch.eye(4, dtype=self.dtype, device=self.device)
+            R4[:3, :3] = R
+        else:
+            R4 = R
+        self._matrix = self._matrix @ R4
+        return self
+    
+    def translate(self, x, y, z):
+        T = torch.eye(4, dtype=self.dtype, device=self.device)
+        T[0, 3] = x
+        T[1, 3] = y
+        T[2, 3] = z
+        self._matrix = self._matrix @ T
+        return self
+    
+    def transform_points(self, points):
+        # points: (B, N, 3) or (N, 3)
+        if points.dim() == 2:
+            points = points.unsqueeze(0)
+        B, N, _ = points.shape
+        ones = torch.ones(B, N, 1, dtype=self.dtype, device=self.device)
+        points_h = torch.cat([points, ones], dim=-1)  # (B, N, 4)
+        transformed = points_h @ self._matrix.T  # (B, N, 4)
+        return transformed[..., :3]  # (B, N, 3)
 
 ROOT: str = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.append(os.path.join(ROOT, "utils", "third_party", "sam3d", "notebook"))

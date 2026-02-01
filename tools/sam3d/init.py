@@ -192,10 +192,20 @@ def process_single_object(
         log_path = os.path.join(_output_dir, f"{object_name}_sam3d.log")
         # Prepare environment variables, ensuring CONDA_PREFIX is included (inferred from Python path)
         env = prepare_env_with_conda_prefix(_sam3d_env_bin)
+        # Fix Windows subprocess buffering: set PYTHONUNBUFFERED
+        env["PYTHONUNBUFFERED"] = "1"
+        
+        # Windows-specific: use CREATE_NO_WINDOW to avoid console issues
+        import platform
+        creationflags = 0
+        if platform.system() == "Windows":
+            creationflags = subprocess.CREATE_NO_WINDOW
+        
         with open(log_path, 'w') as log_file:
             r = subprocess.run(
                 [
                     _sam3d_env_bin,
+                    "-u",  # Run Python unbuffered (fixes Windows stdout hang)
                     SAM3D_WORKER,
                     "--image",
                     _target_image,
@@ -211,9 +221,11 @@ def process_single_object(
                 cwd=ROOT,
                 check=True,
                 text=True,
+                stdin=subprocess.DEVNULL,  # Close stdin to prevent blocking
                 stdout=log_file,
                 stderr=subprocess.STDOUT,  # Also redirect stderr to stdout
                 env=env,  # Pass environment variables
+                creationflags=creationflags,  # Windows: avoid console issues
             )
 
         # Read JSON output from file instead of parsing from stdout (avoid stdout pollution)
@@ -297,10 +309,26 @@ def reconstruct_full_scene() -> Dict[str, object]:
         log(f"[SAM_INIT] SAM worker output will be saved to: {sam_log_path}")
         # Prepare environment variables, ensuring CONDA_PREFIX is included (inferred from Python path)
         env = prepare_env_with_conda_prefix(_sam_env_bin)
+        # Fix Windows subprocess buffering: set PYTHONUNBUFFERED
+        env["PYTHONUNBUFFERED"] = "1"
+        
+        # Debug logging
+        log(f"[SAM_INIT] Spawning SAM worker: {_sam_env_bin} -u {SAM_WORKER}")
+        log(f"[SAM_INIT] CWD: {ROOT}")
+        log(f"[SAM_INIT] Image: {_target_image}")
+        log(f"[SAM_INIT] Output: {all_masks_path}")
+        
+        # Windows-specific: use CREATE_NO_WINDOW to avoid console issues
+        import platform
+        creationflags = 0
+        if platform.system() == "Windows":
+            creationflags = subprocess.CREATE_NO_WINDOW
+        
         with open(sam_log_path, 'w') as log_file:
             subprocess.run(
                 [
                     _sam_env_bin,
+                    "-u",  # Run Python unbuffered (fixes Windows stdout hang)
                     SAM_WORKER,
                     "--image",
                     _target_image,
@@ -310,9 +338,11 @@ def reconstruct_full_scene() -> Dict[str, object]:
                 cwd=ROOT,
                 check=True,
                 text=True,
+                stdin=subprocess.DEVNULL,  # Close stdin to prevent blocking
                 stdout=log_file,
                 stderr=subprocess.STDOUT,  # Also redirect stderr to stdout
                 env=env,  # Pass environment variables
+                creationflags=creationflags,  # Windows: avoid console issues
             )
 
         # Step 2: Load masks and object name mapping
