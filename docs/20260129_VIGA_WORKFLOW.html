@@ -1,0 +1,1250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VIGA Workflow</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
+            color: #1a1a2e;
+            min-height: 100vh;
+        }
+        h1 {
+            text-align: center;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #0891b2, #2563eb);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .subtitle {
+            text-align: center;
+            color: #64748b;
+            margin-bottom: 40px;
+            font-size: 1.1em;
+        }
+        
+        /* Third Party Tools Section */
+        .tools-section {
+            background: rgba(255,255,255,0.8);
+            border-radius: 15px;
+            padding: 30px;
+            margin: 30px 0;
+            border: 1px solid rgba(0,0,0,0.08);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+        .section-title {
+            font-size: 1.5em;
+            color: #0891b2;
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .tools-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        .tool-card {
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 20px;
+            border-left: 4px solid #3a7bd5;
+            transition: transform 0.2s;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .tool-card:hover {
+            transform: translateX(5px);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+        }
+        .tool-card.blender { border-left-color: #ea7600; }
+        .tool-card.infinigen { border-left-color: #27ae60; }
+        .tool-card.sam { border-left-color: #9b59b6; }
+        .tool-card.gpt { border-left-color: #00a67e; }
+        
+        .tool-name {
+            font-size: 1.2em;
+            font-weight: bold;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .tool-card.blender .tool-name { color: #ea7600; }
+        .tool-card.infinigen .tool-name { color: #27ae60; }
+        .tool-card.sam .tool-name { color: #9b59b6; }
+        .tool-card.gpt .tool-name { color: #00a67e; }
+        
+        .tool-desc {
+            color: #475569;
+            font-size: 0.95em;
+            margin-bottom: 15px;
+        }
+        .tool-features {
+            font-size: 0.85em;
+            color: #64748b;
+        }
+        .tool-features li {
+            margin: 5px 0;
+        }
+        .tool-path {
+            background: #f1f5f9;
+            padding: 8px 12px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 0.8em;
+            color: #64748b;
+            margin-top: 10px;
+            word-break: break-all;
+            border: 1px solid #e2e8f0;
+        }
+
+        /* Pipeline Flow */
+        .pipeline {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            margin-top: 40px;
+        }
+        .stage {
+            background: #ffffff;
+            border-radius: 15px;
+            padding: 25px;
+            border: 1px solid rgba(0,0,0,0.08);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+        .stage-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        .stage-number {
+            background: linear-gradient(135deg, #0891b2, #2563eb);
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.2em;
+        }
+        .stage-title {
+            font-size: 1.4em;
+            font-weight: bold;
+            color: #1e293b;
+        }
+        .stage-content {
+            margin-left: 55px;
+            color: #475569;
+        }
+        .arrow {
+            text-align: center;
+            font-size: 2em;
+            color: #2563eb;
+        }
+        
+        /* Component Grid */
+        .component-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .component {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 10px;
+            padding: 15px;
+            text-align: center;
+        }
+        .component-icon {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+        .component-name {
+            font-weight: bold;
+            color: #0891b2;
+        }
+        
+        /* Architecture Diagram */
+        .architecture {
+            background: rgba(255,255,255,0.8);
+            border-radius: 15px;
+            padding: 30px;
+            margin: 40px 0;
+            border: 1px solid rgba(0,0,0,0.08);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+        .arch-title {
+            text-align: center;
+            font-size: 1.5em;
+            margin-bottom: 25px;
+            color: #0891b2;
+        }
+        .dual-agent {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            flex-wrap: wrap;
+        }
+        .agent-box {
+            background: #ffffff;
+            border-radius: 15px;
+            padding: 25px;
+            width: 280px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .agent-box.generator {
+            border: 2px solid #27ae60;
+        }
+        .agent-box.verifier {
+            border: 2px solid #e74c3c;
+        }
+        .agent-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            margin-bottom: 15px;
+        }
+        .agent-box.generator .agent-title { color: #27ae60; }
+        .agent-box.verifier .agent-title { color: #e74c3c; }
+        .agent-tools {
+            text-align: left;
+            font-size: 0.9em;
+            color: #475569;
+        }
+        .agent-tools li {
+            margin: 8px 0;
+        }
+        .loop-arrow {
+            display: flex;
+            align-items: center;
+            font-size: 3em;
+            color: #f39c12;
+        }
+        
+        /* Code Block */
+        .code-block {
+            background: #1e293b;
+            border-radius: 10px;
+            padding: 20px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            border: 1px solid #334155;
+            color: #e2e8f0;
+        }
+        
+        /* Mode comparison */
+        .mode-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        .mode-table th, .mode-table td {
+            border: 1px solid #e2e8f0;
+            padding: 12px;
+            text-align: left;
+        }
+        .mode-table th {
+            background: #eff6ff;
+            color: #0891b2;
+        }
+        .mode-table tr:nth-child(even) {
+            background: #f8fafc;
+        }
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+        .badge-yes { background: #27ae60; color: white; }
+        .badge-no { background: #94a3b8; color: white; }
+        .badge-optional { background: #f39c12; color: white; }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            margin-top: 50px;
+            padding-top: 30px;
+            border-top: 1px solid #e2e8f0;
+            color: #64748b;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎬 VIGA Workflow</h1>
+    <p class="subtitle">Vision-Guided Agentic 3D Scene Generation</p>
+
+    <!-- Third Party Tools -->
+    <div class="tools-section">
+        <div class="section-title">🛠️ Core Components & Third-Party Tools</div>
+        
+        <!-- Vision LLMs -->
+        <h3 style="color: #0891b2; margin: 20px 0 15px 0;">🧠 Vision Language Models (Choose One)</h3>
+        <div class="tools-grid">
+            <div class="tool-card gpt">
+                <div class="tool-name">🟢 OpenAI GPT-4o</div>
+                <div class="tool-desc">Primary vision model. Analyzes images and generates Blender Python code.</div>
+                <ul class="tool-features">
+                    <li>🔍 Best image understanding</li>
+                    <li>🐍 Reliable code generation</li>
+                    <li>✅ Production ready</li>
+                </ul>
+                <div class="tool-path">api.openai.com/v1/chat/completions</div>
+            </div>
+            
+            <div class="tool-card" style="border-left-color: #4285f4;">
+                <div class="tool-name" style="color: #4285f4;">🔵 Google Gemini</div>
+                <div class="tool-desc">Alternative vision model. Google multimodal AI with vision capabilities.</div>
+                <ul class="tool-features">
+                    <li>🔍 Multimodal vision</li>
+                    <li>🔍 Good vision capabilities</li>
+                    <li>⚡ Fast responses</li>
+                </ul>
+                <div class="tool-path">generativelanguage.googleapis.com</div>
+            </div>
+            
+            <div class="tool-card" style="border-left-color: #d4a574;">
+                <div class="tool-name" style="color: #d4a574;">🟤 Anthropic Claude</div>
+                <div class="tool-desc">Claude models with vision. Good for complex reasoning.</div>
+                <ul class="tool-features">
+                    <li>🧠 Strong reasoning</li>
+                    <li>📝 Detailed outputs</li>
+                    <li>✅ Enterprise ready</li>
+                </ul>
+                <div class="tool-path">api.anthropic.com/v1</div>
+            </div>
+            
+            <div class="tool-card" style="border-left-color: #f55036;">
+                <div class="tool-name" style="color: #f55036;">🔴 Groq (Llama)</div>
+                <div class="tool-desc">Fast inference for Llama models. High-speed inference platform.</div>
+                <ul class="tool-features">
+                    <li>⚡ Ultra-fast inference</li>
+                    <li>🚀 High throughput</li>
+                    <li>⚠️ Vision models deprecated</li>
+                </ul>
+                <div class="tool-path">api.groq.com/openai/v1</div>
+            </div>
+            
+            <div class="tool-card" style="border-left-color: #7c3aed;">
+                <div class="tool-name" style="color: #7c3aed;">🟣 Qwen (Local)</div>
+                <div class="tool-desc">Self-hosted Qwen models. Privacy-focused, runs on your hardware.</div>
+                <ul class="tool-features">
+                    <li>🏠 Run locally</li>
+                    <li>🔒 Data stays local</li>
+                    <li>🖥️ Requires GPU</li>
+                </ul>
+                <div class="tool-path">localhost:8000/v1</div>
+            </div>
+        </div>
+        
+        <!-- 3D Generation Tools -->
+        <h3 style="color: #0891b2; margin: 30px 0 15px 0;">🎨 3D Generation & Rendering</h3>
+        <div class="tools-grid">
+            <div class="tool-card blender">
+                <div class="tool-name">🟠 Blender</div>
+                <div class="tool-desc">Open-source 3D creation software. Executes Python scripts for geometry, materials, lighting, animation.</div>
+                <ul class="tool-features">
+                    <li>Cycles/EEVEE rendering</li>
+                    <li>Python scripting API</li>
+                    <li>Procedural modeling</li>
+                </ul>
+                <div class="tool-path">C:\Program Files\Blender Foundation\Blender 4.5\</div>
+            </div>
+            
+            <div class="tool-card" style="border-left-color: #e91e63;">
+                <div class="tool-name" style="color: #e91e63;">🔷 Meshy API</div>
+                <div class="tool-desc">Text-to-3D and Image-to-3D. Creates detailed 3D assets with PBR textures.</div>
+                <ul class="tool-features">
+                    <li>📝 Text-to-3D generation</li>
+                    <li>🖼️ Image-to-3D reconstruction</li>
+                    <li>📦 GLB/FBX export</li>
+                </ul>
+                <div class="tool-path">tools/assets/meshy.py</div>
+            </div>
+            
+            <div class="tool-card infinigen">
+                <div class="tool-name">🟢 Infinigen</div>
+                <div class="tool-desc">Procedural generator for realistic 3D worlds. Nature scenes, indoor environments.</div>
+                <ul class="tool-features">
+                    <li>Procedural terrain & plants</li>
+                    <li>Indoor scene generation</li>
+                    <li>Asset libraries</li>
+                </ul>
+                <div class="tool-path">utils/third_party/infinigen/</div>
+            </div>
+        </div>
+        
+        <!-- Segmentation & Reconstruction -->
+        <h3 style="color: #0891b2; margin: 30px 0 15px 0;">🔍 Segmentation & 3D Reconstruction</h3>
+        <div class="tools-grid">
+            <div class="tool-card sam">
+                <div class="tool-name">🟣 SAM (Segment Anything)</div>
+                <div class="tool-desc">Meta's automatic segmentation. Detects all objects in an image.</div>
+                <ul class="tool-features">
+                    <li>Auto-segment everything</li>
+                    <li>High-quality masks</li>
+                    <li>ViT-H backbone</li>
+                </ul>
+                <div class="tool-path">utils/third_party/sam/</div>
+            </div>
+            
+            <div class="tool-card sam">
+                <div class="tool-name">🟣 SAM3 (with Text Prompts)</div>
+                <div class="tool-desc">SAM version 3. Segment specific objects using text descriptions.</div>
+                <ul class="tool-features">
+                    <li>Text-prompted segmentation</li>
+                    <li>"Segment the bottle"</li>
+                    <li>More precise control</li>
+                </ul>
+                <div class="tool-path">utils/third_party/sam3/</div>
+            </div>
+            
+            <div class="tool-card sam">
+                <div class="tool-name">🟣 SAM3D (2D→3D)</div>
+                <div class="tool-desc">Reconstructs 3D meshes from segmented 2D images. Exports to GLB.</div>
+                <ul class="tool-features">
+                    <li>Mask → 3D mesh</li>
+                    <li>Depth estimation</li>
+                    <li>GLB export</li>
+                </ul>
+                <div class="tool-path">utils/third_party/sam3d/</div>
+            </div>
+        </div>
+        
+        <!-- Other Tools -->
+        <h3 style="color: #0891b2; margin: 30px 0 15px 0;">📦 Additional Tools</h3>
+        <div class="tools-grid">
+            <div class="tool-card" style="border-left-color: #ff6b35;">
+                <div class="tool-name" style="color: #ff6b35;">📊 Slides (PPTX)</div>
+                <div class="tool-desc">PowerPoint slide generation using Python-pptx and unoconv for rendering.</div>
+                <ul class="tool-features">
+                    <li>Auto-generate presentations</li>
+                    <li>PPTX → PNG screenshots</li>
+                    <li>unoconv conversion</li>
+                </ul>
+                <div class="tool-path">tools/slides/</div>
+            </div>
+            
+            <div class="tool-card" style="border-left-color: #17a2b8;">
+                <div class="tool-name" style="color: #17a2b8;">🔌 MCP (Model Context Protocol)</div>
+                <div class="tool-desc">Tool server framework. All tools run as MCP servers with JSON-RPC.</div>
+                <ul class="tool-features">
+                    <li>FastMCP framework</li>
+                    <li>Tool registration</li>
+                    <li>Async execution</li>
+                </ul>
+                <div class="tool-path">mcp.server.fastmcp</div>
+            </div>
+            
+            <div class="tool-card" style="border-left-color: #6c757d;">
+                <div class="tool-name" style="color: #6c757d;">🖼️ PIL/Pillow</div>
+                <div class="tool-desc">Image processing library. Resizes, converts, and encodes images for API calls.</div>
+                <ul class="tool-features">
+                    <li>Image resizing</li>
+                    <li>Base64 encoding</li>
+                    <li>Format conversion</li>
+                </ul>
+                <div class="tool-path">Python: PIL/Pillow</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pipeline Modes Explanation -->
+    <div class="tools-section">
+        <div class="section-title">📋 Pipeline Modes Explained</div>
+        
+        <!-- Mode Selector Tabs -->
+        <style>
+            .mode-tabs {
+                display: flex;
+                gap: 8px;
+                margin-bottom: 25px;
+                flex-wrap: wrap;
+            }
+            .mode-tab {
+                padding: 12px 20px;
+                border-radius: 25px;
+                font-weight: 600;
+                font-size: 0.9em;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                border: 2px solid transparent;
+                background: #f1f5f9;
+                color: #64748b;
+            }
+            .mode-tab:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            }
+            .mode-tab.active, .mode-tab:hover {
+                color: white;
+            }
+            .mode-tab[data-mode="dynamic"] { border-color: #e74c3c; }
+            .mode-tab[data-mode="dynamic"].active, .mode-tab[data-mode="dynamic"]:hover { background: #e74c3c; }
+            .mode-tab[data-mode="static"] { border-color: #3498db; }
+            .mode-tab[data-mode="static"].active, .mode-tab[data-mode="static"]:hover { background: #3498db; }
+            .mode-tab[data-mode="gym"] { border-color: #27ae60; }
+            .mode-tab[data-mode="gym"].active, .mode-tab[data-mode="gym"]:hover { background: #27ae60; }
+            .mode-tab[data-mode="bench"] { border-color: #9b59b6; }
+            .mode-tab[data-mode="bench"].active, .mode-tab[data-mode="bench"]:hover { background: #9b59b6; }
+            .mode-tab[data-mode="slide"] { border-color: #f39c12; }
+            .mode-tab[data-mode="slide"].active, .mode-tab[data-mode="slide"]:hover { background: #f39c12; }
+            
+            .mode-flow {
+                display: flex;
+                align-items: stretch;
+                gap: 0;
+                margin: 20px 0;
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+            .flow-box {
+                background: white;
+                border-radius: 12px;
+                padding: 20px;
+                text-align: center;
+                min-width: 160px;
+                max-width: 200px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+                border: 1px solid #e2e8f0;
+                flex: 1;
+            }
+            .flow-box.input { border-top: 4px solid #3498db; }
+            .flow-box.process { border-top: 4px solid #f39c12; }
+            .flow-box.output { border-top: 4px solid #27ae60; }
+            .flow-icon {
+                font-size: 2.5em;
+                margin-bottom: 10px;
+            }
+            .flow-label {
+                font-size: 0.75em;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+                color: #94a3b8;
+                margin-bottom: 5px;
+            }
+            .flow-title {
+                font-weight: 700;
+                color: #1e293b;
+                font-size: 1em;
+            }
+            .flow-desc {
+                font-size: 0.85em;
+                color: #64748b;
+                margin-top: 8px;
+            }
+            .flow-arrow {
+                display: flex;
+                align-items: center;
+                font-size: 1.8em;
+                color: #cbd5e1;
+                padding: 0 10px;
+            }
+            
+            .mode-details {
+                background: #f8fafc;
+                border-radius: 12px;
+                padding: 20px;
+                margin-top: 15px;
+            }
+            .mode-detail-row {
+                display: flex;
+                gap: 30px;
+                flex-wrap: wrap;
+            }
+            .mode-detail-col {
+                flex: 1;
+                min-width: 250px;
+            }
+            .mode-detail-col h4 {
+                color: #0891b2;
+                margin: 0 0 12px 0;
+                font-size: 0.95em;
+            }
+            .mode-detail-col ul {
+                margin: 0;
+                padding-left: 20px;
+                color: #475569;
+                font-size: 0.9em;
+            }
+            .mode-detail-col li {
+                margin: 6px 0;
+            }
+            .example-box {
+                background: linear-gradient(135deg, #0891b2 0%, #2563eb 100%);
+                color: white;
+                padding: 12px 18px;
+                border-radius: 8px;
+                font-size: 0.9em;
+                margin-top: 15px;
+                display: inline-block;
+            }
+            .example-box strong {
+                opacity: 0.8;
+            }
+        </style>
+        
+        <!-- Mode Tabs -->
+        <div class="mode-tabs">
+            <div class="mode-tab active" data-mode="dynamic">🎬 dynamic_scene</div>
+            <div class="mode-tab" data-mode="static">🖼️ static_scene</div>
+            <div class="mode-tab" data-mode="gym">🎮 BlenderGym</div>
+            <div class="mode-tab" data-mode="bench">🏆 BlenderBench</div>
+            <div class="mode-tab" data-mode="slide">📊 SlideBench</div>
+        </div>
+        
+        <!-- Dynamic Scene -->
+        <div class="mode-content" id="mode-dynamic">
+            <h3 style="color: #e74c3c; margin: 0 0 5px 0;">Animated 3D Scene Generation</h3>
+            <p style="color: #64748b; margin: 0 0 20px 0;">2D image + text description → Full 3D scene with animation and physics</p>
+            
+            <div class="mode-flow">
+                <div class="flow-box input">
+                    <div class="flow-icon">🖼️</div>
+                    <div class="flow-label">Input</div>
+                    <div class="flow-title">Image + Text</div>
+                    <div class="flow-desc">"Bottle tips over and rolls"</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-box process">
+                    <div class="flow-icon">🤖</div>
+                    <div class="flow-label">Process</div>
+                    <div class="flow-title">GPT-4o + Blender</div>
+                    <div class="flow-desc">Vision analysis → Python code</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-box output">
+                    <div class="flow-icon">🎬</div>
+                    <div class="flow-label">Output</div>
+                    <div class="flow-title">Animated Scene</div>
+                    <div class="flow-desc">.blend + render frames</div>
+                </div>
+            </div>
+            
+            <div class="mode-details">
+                <div class="mode-detail-row">
+                    <div class="mode-detail-col">
+                        <h4>✨ Features</h4>
+                        <ul>
+                            <li>Keyframe animation generation</li>
+                            <li>Physics simulation support</li>
+                            <li>Multi-object interactions</li>
+                        </ul>
+                    </div>
+                    <div class="mode-detail-col">
+                        <h4>🔧 Tools Used</h4>
+                        <ul>
+                            <li><strong>GPT-4o</strong> — Required</li>
+                            <li><strong>Blender</strong> — Required</li>
+                            <li><strong>Meshy/SAM</strong> — Optional</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="example-box">
+                    <strong>Example:</strong> Green tea bottle tips over on desk
+                </div>
+            </div>
+        </div>
+        
+        <!-- Static Scene -->
+        <div class="mode-content" id="mode-static" style="display: none;">
+            <h3 style="color: #3498db; margin: 0 0 5px 0;">Static 3D Scene Reconstruction</h3>
+            <p style="color: #64748b; margin: 0 0 20px 0;">2D image → Still 3D composition matching the photo</p>
+            
+            <div class="mode-flow">
+                <div class="flow-box input">
+                    <div class="flow-icon">📷</div>
+                    <div class="flow-label">Input</div>
+                    <div class="flow-title">Single Image</div>
+                    <div class="flow-desc">Photo of a scene</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-box process">
+                    <div class="flow-icon">🔷</div>
+                    <div class="flow-label">Process</div>
+                    <div class="flow-title">GPT-4o + Meshy</div>
+                    <div class="flow-desc">Generate detailed 3D assets</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-box output">
+                    <div class="flow-icon">🏠</div>
+                    <div class="flow-label">Output</div>
+                    <div class="flow-title">3D Scene</div>
+                    <div class="flow-desc">Accurate recreation</div>
+                </div>
+            </div>
+            
+            <div class="mode-details">
+                <div class="mode-detail-row">
+                    <div class="mode-detail-col">
+                        <h4>✨ Features</h4>
+                        <ul>
+                            <li>High-fidelity asset generation</li>
+                            <li>PBR material recreation</li>
+                            <li>Accurate lighting match</li>
+                        </ul>
+                    </div>
+                    <div class="mode-detail-col">
+                        <h4>🔧 Tools Used</h4>
+                        <ul>
+                            <li><strong>GPT-4o</strong> — Required</li>
+                            <li><strong>Meshy</strong> — Default</li>
+                            <li><strong>Blender</strong> — Required</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="example-box">
+                    <strong>Example:</strong> Recreate a room interior from photo
+                </div>
+            </div>
+        </div>
+        
+        <!-- BlenderGym -->
+        <div class="mode-content" id="mode-gym" style="display: none;">
+            <h3 style="color: #27ae60; margin: 0 0 5px 0;">Single-Step 3D Editing</h3>
+            <p style="color: #64748b; margin: 0 0 20px 0;">Existing Blender scene + instruction → One specific modification</p>
+            
+            <div class="mode-flow">
+                <div class="flow-box input">
+                    <div class="flow-icon">📦</div>
+                    <div class="flow-label">Input</div>
+                    <div class="flow-title">.blend + Instruction</div>
+                    <div class="flow-desc">"Change color to red"</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-box process">
+                    <div class="flow-icon">✏️</div>
+                    <div class="flow-label">Process</div>
+                    <div class="flow-title">GPT-4o Edit</div>
+                    <div class="flow-desc">Generate edit script</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-box output">
+                    <div class="flow-icon">✅</div>
+                    <div class="flow-label">Output</div>
+                    <div class="flow-title">Modified Scene</div>
+                    <div class="flow-desc">Single change applied</div>
+                </div>
+            </div>
+            
+            <div class="mode-details">
+                <div class="mode-detail-row">
+                    <div class="mode-detail-col">
+                        <h4>✨ Features</h4>
+                        <ul>
+                            <li>Simple, focused modifications</li>
+                            <li>Uses Infinigen procedural assets</li>
+                            <li>Fast single-step edits</li>
+                        </ul>
+                    </div>
+                    <div class="mode-detail-col">
+                        <h4>🔧 Tools Used</h4>
+                        <ul>
+                            <li><strong>GPT-4o</strong> — Required</li>
+                            <li><strong>Infinigen</strong> — Used</li>
+                            <li><strong>Blender</strong> — Required</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="example-box">
+                    <strong>Example:</strong> "Move the lamp to the left"
+                </div>
+            </div>
+        </div>
+        
+        <!-- BlenderBench -->
+        <div class="mode-content" id="mode-bench" style="display: none;">
+            <h3 style="color: #9b59b6; margin: 0 0 5px 0;">Multi-Step Complex Editing</h3>
+            <p style="color: #64748b; margin: 0 0 20px 0;">Benchmark with Level 1-3 difficulty — Multiple sequential edits</p>
+            
+            <div class="mode-flow">
+                <div class="flow-box input">
+                    <div class="flow-icon">🔄</div>
+                    <div class="flow-label">Input</div>
+                    <div class="flow-title">Before + Target</div>
+                    <div class="flow-desc">Two scene images</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-box process">
+                    <div class="flow-icon">🔁</div>
+                    <div class="flow-label">Process</div>
+                    <div class="flow-title">Iterative Editing</div>
+                    <div class="flow-desc">Multi-step transforms</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-box output">
+                    <div class="flow-icon">🏆</div>
+                    <div class="flow-label">Output</div>
+                    <div class="flow-title">Matched Target</div>
+                    <div class="flow-desc">Scene B achieved</div>
+                </div>
+            </div>
+            
+            <div class="mode-details">
+                <div class="mode-detail-row">
+                    <div class="mode-detail-col">
+                        <h4>📊 Difficulty Levels</h4>
+                        <ul>
+                            <li><strong>Level 1:</strong> Easy (1-2 edits)</li>
+                            <li><strong>Level 2:</strong> Medium (3-5 edits)</li>
+                            <li><strong>Level 3:</strong> Hard (6+ edits)</li>
+                        </ul>
+                    </div>
+                    <div class="mode-detail-col">
+                        <h4>🔧 Tools Used</h4>
+                        <ul>
+                            <li><strong>GPT-4o</strong> — Required</li>
+                            <li><strong>Infinigen</strong> — Used</li>
+                            <li><strong>Blender</strong> — Required</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="example-box">
+                    <strong>Example:</strong> Transform scene A into scene B
+                </div>
+            </div>
+        </div>
+        
+        <!-- SlideBench -->
+        <div class="mode-content" id="mode-slide" style="display: none;">
+            <h3 style="color: #f39c12; margin: 0 0 5px 0;">PowerPoint Slide Generation</h3>
+            <p style="color: #64748b; margin: 0 0 20px 0;">Text descriptions → Professional presentation slides (2D, not 3D)</p>
+            
+            <div class="mode-flow">
+                <div class="flow-box input">
+                    <div class="flow-icon">📝</div>
+                    <div class="flow-label">Input</div>
+                    <div class="flow-title">Description</div>
+                    <div class="flow-desc">Slide content text</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-box process">
+                    <div class="flow-icon">⚙️</div>
+                    <div class="flow-label">Process</div>
+                    <div class="flow-title">python-pptx</div>
+                    <div class="flow-desc">Generate layout</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-box output">
+                    <div class="flow-icon">📊</div>
+                    <div class="flow-label">Output</div>
+                    <div class="flow-title">.pptx File</div>
+                    <div class="flow-desc">Ready presentation</div>
+                </div>
+            </div>
+            
+            <div class="mode-details">
+                <div class="mode-detail-row">
+                    <div class="mode-detail-col">
+                        <h4>✨ Features</h4>
+                        <ul>
+                            <li>Auto layout generation</li>
+                            <li>Text, images, charts</li>
+                            <li>PNG export via unoconv</li>
+                        </ul>
+                    </div>
+                    <div class="mode-detail-col">
+                        <h4>🔧 Tools Used</h4>
+                        <ul>
+                            <li><strong>GPT-4o</strong> — Required</li>
+                            <li><strong>python-pptx</strong> — Required</li>
+                            <li><strong>unoconv</strong> — For export</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="example-box">
+                    <strong>Example:</strong> "Create a title slide about AI"
+                </div>
+            </div>
+        </div>
+        
+        <script>
+            document.querySelectorAll('.mode-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    document.querySelectorAll('.mode-content').forEach(c => c.style.display = 'none');
+                    document.getElementById('mode-' + tab.dataset.mode).style.display = 'block';
+                });
+            });
+        </script>
+        
+        <!-- Tool Usage Table -->
+        <h3 style="color: #0891b2; margin: 30px 0 15px 0;">🔧 Tool Usage by Mode</h3>
+        <table class="mode-table">
+            <tr>
+                <th>Mode</th>
+                <th>GPT-4o</th>
+                <th>Meshy</th>
+                <th>SAM/SAM3D</th>
+                <th>Infinigen</th>
+                <th>Blender</th>
+            </tr>
+            <tr>
+                <td><strong>dynamic_scene</strong></td>
+                <td><span class="badge badge-yes">✓ Required</span></td>
+                <td><span class="badge badge-optional">Optional</span></td>
+                <td><span class="badge badge-optional">Optional</span></td>
+                <td><span class="badge badge-no">—</span></td>
+                <td><span class="badge badge-yes">✓ Required</span></td>
+            </tr>
+            <tr>
+                <td><strong>static_scene</strong></td>
+                <td><span class="badge badge-yes">✓ Required</span></td>
+                <td><span class="badge badge-yes">✓ Default</span></td>
+                <td><span class="badge badge-optional">Optional</span></td>
+                <td><span class="badge badge-optional">Optional</span></td>
+                <td><span class="badge badge-yes">✓ Required</span></td>
+            </tr>
+            <tr>
+                <td><strong>BlenderGym</strong></td>
+                <td><span class="badge badge-yes">✓ Required</span></td>
+                <td><span class="badge badge-no">—</span></td>
+                <td><span class="badge badge-no">—</span></td>
+                <td><span class="badge badge-yes">✓ Used</span></td>
+                <td><span class="badge badge-yes">✓ Required</span></td>
+            </tr>
+            <tr>
+                <td><strong>BlenderBench</strong></td>
+                <td><span class="badge badge-yes">✓ Required</span></td>
+                <td><span class="badge badge-no">—</span></td>
+                <td><span class="badge badge-no">—</span></td>
+                <td><span class="badge badge-yes">✓ Used</span></td>
+                <td><span class="badge badge-yes">✓ Required</span></td>
+            </tr>
+            <tr>
+                <td><strong>SlideBench</strong></td>
+                <td><span class="badge badge-yes">✓ Required</span></td>
+                <td><span class="badge badge-no">—</span></td>
+                <td><span class="badge badge-no">—</span></td>
+                <td><span class="badge badge-no">—</span></td>
+                <td><span class="badge badge-no">—</span></td>
+            </tr>
+        </table>
+        
+        <h3 style="color: #0891b2; margin-top: 30px;">🔍 Where Each API is Used</h3>
+        <table class="mode-table">
+            <tr>
+                <th>Component</th>
+                <th>What It Does</th>
+                <th>When Called</th>
+            </tr>
+            <tr>
+                <td style="color: #00a67e;"><strong>GPT-4o (ChatGPT)</strong></td>
+                <td>Analyzes image → Plans scene → Generates Blender Python code</td>
+                <td>Every round of Generator Agent (agents/generator.py)</td>
+            </tr>
+            <tr>
+                <td style="color: #9b59b6;"><strong>SAM / SAM3D</strong></td>
+                <td>Auto-segments ALL objects → Reconstructs 3D meshes → Creates initial scene</td>
+                <td><strong>Stage 2 (Initialization):</strong> <code>--prompt-setting init</code><br>Runs BEFORE agent loop starts</td>
+            </tr>
+            <tr>
+                <td style="color: #e91e63;"><strong>Meshy API</strong></td>
+                <td>Text/Image-to-3D: Creates detailed 3D models on-demand</td>
+                <td><strong>Stage 3+ (During Loop):</strong> When agent calls <code>get_better_object</code><br>Upgrades individual objects during iterations</td>
+            </tr>
+        </table>
+        
+        <div class="info-box">
+            <strong>💡 SAM3D vs Meshy - Different Roles:</strong><br>
+            • <strong>SAM3D</strong> = Bulk scene initialization (reconstructs everything from image)<br>
+            • <strong>Meshy</strong> = On-demand quality upgrades (generates specific objects during refinement)<br><br>
+            They can be used together: SAM3D sets up the scene, Meshy improves individual assets.
+        </div>
+    </div>
+
+    <!-- Pipeline Workflow -->
+    <div class="pipeline">
+        <div class="section-title">🔄 Pipeline Workflow (dynamic_scene mode)</div>
+        
+        <!-- Stage 1: Input -->
+        <div class="stage">
+            <div class="stage-header">
+                <div class="stage-number">1</div>
+                <div class="stage-title">📥 Input</div>
+            </div>
+            <div class="stage-content">
+                <p>User provides target image + text description of dynamic effects.</p>
+                <div class="component-grid">
+                    <div class="component">
+                        <div class="component-icon">🖼️</div>
+                        <div class="component-name">Target Image</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">📝</div>
+                        <div class="component-name">Description</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="arrow">⬇️</div>
+
+        <!-- Stage 2: SAM3D Initialization -->
+        <div class="stage" style="border-left: 4px solid #9b59b6;">
+            <div class="stage-header">
+                <div class="stage-number" style="background: #9b59b6;">2</div>
+                <div class="stage-title">🟣 SAM3D Scene Initialization (Recommended)</div>
+            </div>
+            <div class="stage-content">
+                <p><strong>Enable with:</strong> <code>--prompt-setting init --generator-tools tools/sam3d/init.py,...</code></p>
+                <div class="component-grid">
+                    <div class="component">
+                        <div class="component-icon">🔍</div>
+                        <div class="component-name">SAM Segmentation</div>
+                        <div style="font-size:0.8em;color:#64748b">Auto-detect all objects</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">📦</div>
+                        <div class="component-name">SAM3D → GLB</div>
+                        <div style="font-size:0.8em;color:#64748b">Image → 3D mesh</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">📥</div>
+                        <div class="component-name">Import to Blender</div>
+                        <div style="font-size:0.8em;color:#64748b">Initial scene ready</div>
+                    </div>
+                </div>
+                <div class="info-box" style="margin-top: 15px;">
+                    <strong>⚠️ Without this step:</strong> Agent starts from empty scene and uses only primitives (cubes, cylinders). 
+                    SAM3D gives a much better starting point by reconstructing actual objects from the image.
+                    <br><br>
+                    <strong>Requirements:</strong> Linux + 32GB VRAM GPU, or use <strong>Meshy API</strong> as alternative.
+                </div>
+            </div>
+        </div>
+
+        <div class="arrow">⬇️</div>
+
+        <!-- Stage 3: Vision LLM -->
+        <div class="stage" style="border-left: 4px solid #00a67e;">
+            <div class="stage-header">
+                <div class="stage-number" style="background: #00a67e;">3</div>
+                <div class="stage-title">🧠 GPT-4o (ChatGPT Vision) Analysis</div>
+            </div>
+            <div class="stage-content">
+                <p><strong>OpenAI API call:</strong> Sends image + prompt to GPT-4o → Returns Blender Python code</p>
+                <div class="component-grid">
+                    <div class="component">
+                        <div class="component-icon">👁️</div>
+                        <div class="component-name">Image Analysis</div>
+                        <div style="font-size:0.8em;color:#64748b">GPT-4o vision</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">📐</div>
+                        <div class="component-name">Scene Planning</div>
+                        <div style="font-size:0.8em;color:#64748b">initialize_plan tool</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">🐍</div>
+                        <div class="component-name">Code Generation</div>
+                        <div style="font-size:0.8em;color:#64748b">execute_and_evaluate</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="arrow">⬇️</div>
+
+        <!-- Stage 3.5: Meshy (Optional) -->
+        <div class="stage" style="border-left: 4px solid #e91e63;">
+            <div class="stage-header">
+                <div class="stage-number" style="background: #e91e63;">3.5</div>
+                <div class="stage-title">🔷 (Optional) Meshy API - 3D Asset Generation</div>
+            </div>
+            <div class="stage-content">
+                <p><strong>Meshy API call:</strong> When GPT-4o calls <code>get_better_object</code> tool → Meshy generates detailed 3D model</p>
+                <div class="component-grid">
+                    <div class="component">
+                        <div class="component-icon">📝</div>
+                        <div class="component-name">Text-to-3D</div>
+                        <div style="font-size:0.8em;color:#64748b">"green tea bottle"</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">📦</div>
+                        <div class="component-name">GLB Export</div>
+                        <div style="font-size:0.8em;color:#64748b">With PBR textures</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">📥</div>
+                        <div class="component-name">Import to Blender</div>
+                        <div style="font-size:0.8em;color:#64748b">Replace primitives</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="arrow">⬇️</div>
+
+        <!-- Stage 4: Dual Agent -->
+        <div class="stage">
+            <div class="stage-header">
+                <div class="stage-number">4</div>
+                <div class="stage-title">🤖 Dual-Agent Iterative Refinement</div>
+            </div>
+            <div class="stage-content">
+                <p>Generator creates code, Verifier evaluates renders, loop until satisfactory.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Architecture Diagram -->
+    <div class="architecture">
+        <div class="arch-title">🔄 Dual-Agent Architecture</div>
+        <div class="dual-agent">
+            <div class="agent-box generator">
+                <div class="agent-title">🟢 Generator Agent</div>
+                <p>Creates Blender Python code</p>
+                <ul class="agent-tools">
+                    <li><code>initialize_plan</code></li>
+                    <li><code>execute_and_evaluate</code></li>
+                    <li><code>get_scene_info</code></li>
+                    <li><code>undo_last_step</code></li>
+                    <li><code>end</code></li>
+                </ul>
+            </div>
+            
+            <div class="loop-arrow">⇄</div>
+            
+            <div class="agent-box verifier">
+                <div class="agent-title">🔴 Verifier Agent</div>
+                <p>Evaluates render quality</p>
+                <ul class="agent-tools">
+                    <li><code>investigate</code></li>
+                    <li><code>set_camera</code></li>
+                    <li><code>set_visibility</code></li>
+                    <li><code>set_keyframe</code></li>
+                    <li><code>reload_scene</code></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="pipeline">
+        <div class="arrow">⬇️</div>
+
+        <!-- Stage 5: Blender -->
+        <div class="stage" style="border-left: 4px solid #ea7600;">
+            <div class="stage-header">
+                <div class="stage-number" style="background: #ea7600;">5</div>
+                <div class="stage-title">🟠 Blender Execution</div>
+            </div>
+            <div class="stage-content">
+                <p>Python scripts executed in Blender to build geometry, materials, lighting, animation.</p>
+                <div class="component-grid">
+                    <div class="component">
+                        <div class="component-icon">📦</div>
+                        <div class="component-name">Geometry</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">🎨</div>
+                        <div class="component-name">Materials</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">💡</div>
+                        <div class="component-name">Lighting</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">📷</div>
+                        <div class="component-name">Camera</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">🎬</div>
+                        <div class="component-name">Animation</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="arrow">⬇️</div>
+
+        <!-- Stage 6: Output -->
+        <div class="stage">
+            <div class="stage-header">
+                <div class="stage-number">6</div>
+                <div class="stage-title">📤 Output</div>
+            </div>
+            <div class="stage-content">
+                <p>Final 3D scene with animation ready for rendering.</p>
+                <div class="component-grid">
+                    <div class="component">
+                        <div class="component-icon">📁</div>
+                        <div class="component-name">.blend File</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">🖼️</div>
+                        <div class="component-name">Renders (PNG)</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">🐍</div>
+                        <div class="component-name">Scripts</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Project Structure -->
+    <div class="tools-section">
+        <div class="section-title">📂 Project Structure</div>
+        <div class="code-block">
+VIGA/
+├── agents/           # Generator & Verifier agent implementations
+├── data/             # Input tasks, targets, scripts
+│   ├── dynamic_scene/
+│   ├── static_scene/
+│   └── blendergym/
+├── output/           # Generated results (.blend, renders, scripts)
+├── prompts/          # System prompts for each mode
+├── runners/          # Entry points (dynamic_scene.py, static_scene.py)
+├── tools/            # MCP tool servers
+│   ├── blender/      # Blender execution tools
+│   └── sam3d/        # SAM segmentation tools
+├── utils/
+│   ├── third_party/
+│   │   ├── infinigen/ # Procedural 3D generation
+│   │   ├── sam/       # Segment Anything Model
+│   │   ├── sam3/      # SAM version 3
+│   │   └── sam3d/     # SAM 3D reconstruction
+│   └── _api_keys.py  # API key configuration
+└── main.py           # Main entry point
+        </div>
+    </div>
+
+    <!-- Run Command -->
+    <div class="tools-section">
+        <div class="section-title">💻 Run Commands</div>
+        <div class="code-block">
+# Dynamic Scene (VLM-based, what we tested)
+python runners/dynamic_scene.py --task greentea --model gpt-4o \
+    --blender-command "C:/Program Files/Blender Foundation/Blender 4.5/blender.exe" \
+    --max-rounds 20
+
+# With SAM initialization (auto-detect objects)
+python runners/dynamic_scene.py --task greentea --model gpt-4o \
+    --prompt-setting init \
+    --generator-tools "tools/sam3d/init.py,tools/blender/exec.py,tools/generator_base.py"
+        </div>
+    </div>
+
+    <footer>
+        <p>VIGA - Vision-Guided Agentic Scene Generation</p>
+        <p>Components: GPT-4o + Blender + SAM/SAM3D + Infinigen</p>
+    </footer>
+</body>
+</html>
+

@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VIGA Test Results - January 30, 2026</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background: #f5f5f5;
+            color: #333;
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 15px;
+        }
+        h2 {
+            color: #34495e;
+            margin-top: 40px;
+            border-left: 4px solid #3498db;
+            padding-left: 15px;
+        }
+        h3 {
+            color: #7f8c8d;
+        }
+        .test-section {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            margin: 20px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .image-comparison {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin: 20px 0;
+        }
+        .image-box {
+            text-align: center;
+            background: #ecf0f1;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        .image-box img {
+            max-width: 400px;
+            max-height: 350px;
+            border-radius: 5px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        .image-box p {
+            margin-top: 10px;
+            font-weight: bold;
+            color: #555;
+        }
+        .status-success {
+            color: #27ae60;
+            font-weight: bold;
+        }
+        .status-failed {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .code-block {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background: #3498db;
+            color: white;
+        }
+        tr:nth-child(even) {
+            background: #f9f9f9;
+        }
+        .info-box {
+            background: #e8f4f8;
+            border-left: 4px solid #3498db;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 0 5px 5px 0;
+        }
+        .warning-box {
+            background: #fdf2e9;
+            border-left: 4px solid #e67e22;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 0 5px 5px 0;
+        }
+        .file-path {
+            background: #eee;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 12px;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎬 VIGA Test Results</h1>
+    <p><strong>Date:</strong> January 30, 2026</p>
+    <p><strong>Purpose:</strong> Testing the dynamic_scene pipeline with GPT-4o vision model for image-to-3D scene generation.</p>
+
+    <div style="display: inline-block; background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); color: white; padding: 8px 20px; border-radius: 25px; font-weight: bold; margin: 10px 0;">
+        🎬 Pipeline Mode: dynamic_scene
+    </div>
+
+    <div class="test-section">
+        <h2>📋 Pipeline Modes</h2>
+        <p>VIGA supports multiple pipeline modes. This test used <strong>dynamic_scene</strong>:</p>
+        
+        <table>
+            <tr>
+                <th>Mode</th>
+                <th>Purpose</th>
+                <th>Animation?</th>
+                <th>Use Case</th>
+            </tr>
+            <tr style="background: #fde8e8;">
+                <td><strong>🎬 dynamic_scene</strong></td>
+                <td>Animated 3D scene from image + text</td>
+                <td>✅ Yes</td>
+                <td>"Bottle tips over and rolls"</td>
+            </tr>
+            <tr>
+                <td>🖼️ static_scene</td>
+                <td>Still 3D recreation of an image</td>
+                <td>❌ No</td>
+                <td>Recreate a room from a photo</td>
+            </tr>
+            <tr>
+                <td>🎮 BlenderGym</td>
+                <td>Single-step scene editing</td>
+                <td>❌ No</td>
+                <td>"Change the lamp color to red"</td>
+            </tr>
+            <tr>
+                <td>🏆 BlenderBench</td>
+                <td>Multi-step complex editing</td>
+                <td>❌ No</td>
+                <td>Transform scene A → scene B</td>
+            </tr>
+        </table>
+        
+        <div class="info-box">
+            <strong>Why dynamic_scene?</strong> Both tests required animation — objects moving, tipping, rolling, or smashing. The <code>dynamic_scene</code> pipeline generates keyframe animations in Blender.
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>🔄 What are "Rounds"?</h2>
+        <p>VIGA uses a <strong>dual-agent iterative system</strong>. Each <strong>round</strong> is one complete cycle:</p>
+        
+        <div style="display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; margin: 20px 0; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; color: white;">
+            <div style="text-align: center; padding: 15px;">
+                <div style="font-size: 2em;">🟢</div>
+                <div style="font-weight: bold;">Generator</div>
+                <div style="font-size: 0.85em; opacity: 0.9;">Writes Blender code</div>
+            </div>
+            <div style="font-size: 2em;">→</div>
+            <div style="text-align: center; padding: 15px;">
+                <div style="font-size: 2em;">🟠</div>
+                <div style="font-weight: bold;">Blender</div>
+                <div style="font-size: 0.85em; opacity: 0.9;">Executes & renders</div>
+            </div>
+            <div style="font-size: 2em;">→</div>
+            <div style="text-align: center; padding: 15px;">
+                <div style="font-size: 2em;">🔴</div>
+                <div style="font-weight: bold;">Verifier</div>
+                <div style="font-size: 0.85em; opacity: 0.9;">Evaluates result</div>
+            </div>
+            <div style="font-size: 2em;">→</div>
+            <div style="text-align: center; padding: 15px;">
+                <div style="font-size: 2em;">✅❌</div>
+                <div style="font-weight: bold;">Decision</div>
+                <div style="font-size: 0.85em; opacity: 0.9;">Good? Stop : Loop</div>
+            </div>
+        </div>
+        
+        <div class="info-box">
+            <strong>Example:</strong> "Rounds: 15" means the agents went through 15 iterations of generate → render → evaluate → refine until the Verifier was satisfied (or the Generator called <code>end</code>). More complex scenes = more rounds needed.
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>🍵 Test 1: Green Tea Bottle</h2>
+        
+        <h3>Input</h3>
+        <table>
+            <tr><th>Parameter</th><th>Value</th></tr>
+            <tr><td>Image</td><td>Phone photo of Ito En green tea bottle</td></tr>
+            <tr><td>Description</td><td>"A green tea bottle sits on a desk. The bottle tips over and rolls across the surface."</td></tr>
+        </table>
+
+        <div class="image-comparison">
+            <div class="image-box">
+                <img src="test_results_images/01_greentea_input.jpg" alt="Green Tea Input">
+                <p>📸 Input Photo</p>
+            </div>
+            <div class="image-box">
+                <img src="test_results_images/02_greentea_output.png" alt="Green Tea Output">
+                <p>🎨 Generated 3D Render</p>
+            </div>
+        </div>
+
+        <h3>Test Runs</h3>
+        <table>
+            <tr><th>Run</th><th>Model</th><th>Status</th><th>Time</th><th>Notes</th></tr>
+            <tr>
+                <td>1</td>
+                <td>Llama 4 Scout (Groq)</td>
+                <td class="status-failed">FAILED</td>
+                <td>11.29s</td>
+                <td>Text-only model, couldn't see image</td>
+            </tr>
+            <tr>
+                <td>2</td>
+                <td>GPT-4o</td>
+                <td class="status-success">SUCCESS</td>
+                <td>57.82s</td>
+                <td>4 rounds, needed camera fix</td>
+            </tr>
+            <tr>
+                <td>3</td>
+                <td>GPT-4o (improved prompt)</td>
+                <td class="status-success">SUCCESS</td>
+                <td>86.86s</td>
+                <td>6 rounds, animation keyframes</td>
+            </tr>
+        </table>
+
+        <h3>Generated Objects</h3>
+        <ul>
+            <li>Bottle (green cylinder with transparency)</li>
+            <li>Cap (white cylinder)</li>
+            <li>Desk (brown plane)</li>
+            <li>Camera + Point light</li>
+            <li>Animation: tips over (frame 30), rolls (frame 60)</li>
+        </ul>
+
+        <div class="info-box">
+            <strong>Output Files:</strong><br>
+            <span class="file-path">D:\Projects\ProjectGenesis\VIGA\output\dynamic_scene\20260129_235234\greentea\blender_file_improved.blend</span>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>🎨 Test 2: Cézanne Still Life</h2>
+        
+        <h3>Input</h3>
+        <table>
+            <tr><th>Parameter</th><th>Value</th></tr>
+            <tr><td>Image</td><td>Cézanne painting - Still Life with Jug and Fruit</td></tr>
+            <tr><td>Description</td><td>"Throw a ball onto the table and smash all the objects on the table down."</td></tr>
+        </table>
+
+        <div class="image-comparison">
+            <div class="image-box">
+                <img src="test_results_images/03_artist_input.png" alt="Artist Input">
+                <p>📸 Input Painting</p>
+            </div>
+            <div class="image-box">
+                <img src="test_results_images/04_artist_output.png" alt="Artist Output">
+                <p>🎨 Generated 3D Render</p>
+            </div>
+        </div>
+
+        <h3>Results</h3>
+        <table>
+            <tr><th>Parameter</th><th>Value</th></tr>
+            <tr><td>Model</td><td>GPT-4o</td></tr>
+            <tr><td>Status</td><td class="status-success">SUCCESS</td></tr>
+            <tr><td>Time</td><td>334.87 seconds (5.5 minutes)</td></tr>
+            <tr><td>Rounds</td><td>15</td></tr>
+        </table>
+
+        <h3>Generated Objects</h3>
+        <ul>
+            <li>Apple (red/pink sphere)</li>
+            <li>Pear1, Pear2 (elongated spheres)</li>
+            <li>Cylinders (jug approximation)</li>
+            <li>Multiple spheres (fruits)</li>
+            <li>Planes (table, walls)</li>
+            <li>3 Cameras, Point light</li>
+        </ul>
+
+        <div class="info-box">
+            <strong>Output File:</strong><br>
+            <span class="file-path">D:\Projects\ProjectGenesis\VIGA\output\dynamic_scene\20260129_235727\artist\blender_file.blend</span>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>🔧 Issues Found & Fixes Applied</h2>
+
+        <h3>1. Camera/Lighting Issue</h3>
+        <div class="warning-box">
+            <strong>Problem:</strong> AI sometimes forgets to add camera or lights, resulting in black renders.
+        </div>
+        
+        <p><strong>Fix Applied:</strong> Updated prompt in <code>prompts/dynamic_scene/generator.py</code>:</p>
+        <div class="code-block">
+[Guiding Principles]
+• Start with geometry, camera, lighting; then add animation.
+• CRITICAL: Every scene MUST include a camera.
+• Set the camera as active: bpy.context.scene.camera = camera_object
+• Position camera to frame all scene objects in view.
+• Add at least one light source (POINT, SUN, or AREA).
+
+[Quality Guidelines for Realistic Rendering]
+• Use proper PBR materials with Principled BSDF shader
+• For transparent objects: use Transmission Weight
+• Add subdivision surface modifier for smooth curves
+• Use multiple light sources: key, fill, rim
+• Set render engine to CYCLES
+        </div>
+
+        <h3>2. API Key Issues</h3>
+        <table>
+            <tr><th>Provider</th><th>Status</th><th>Notes</th></tr>
+            <tr><td>Gemini</td><td class="status-failed">Exhausted</td><td>Free tier quota hit</td></tr>
+            <tr><td>Groq (Llama vision)</td><td class="status-failed">Decommissioned</td><td>Models removed</td></tr>
+            <tr><td>OpenAI GPT-4o</td><td class="status-success">Working</td><td>Requires $5+ credits</td></tr>
+        </table>
+
+        <h3>3. Blender 4.5 Compatibility</h3>
+        <p><code>Transmission</code> renamed to <code>Transmission Weight</code> in Principled BSDF shader.</p>
+    </div>
+
+    <div class="test-section">
+        <h2>⚠️ Current Limitations</h2>
+        <ul>
+            <li><strong>Primitive-based:</strong> Creates basic shapes (spheres, cylinders), not detailed meshes</li>
+            <li><strong>No textures:</strong> Materials are solid colors only</li>
+            <li><strong>Camera positioning:</strong> Often needs manual adjustment</li>
+            <li><strong>Light energy:</strong> Sometimes too dim</li>
+        </ul>
+
+        <h2>💡 Recommendations for Better Results</h2>
+        <ol>
+            <li>Use 3D asset generation APIs (Meshy, Rodin) for detailed objects</li>
+            <li>Pre-made asset libraries for common objects</li>
+            <li>HDRI environment lighting for realistic illumination</li>
+            <li>More specific prompts with exact dimensions</li>
+            <li>Iterative refinement with visual feedback loop</li>
+        </ol>
+    </div>
+
+    <div class="test-section">
+        <h2>⚙️ Configuration</h2>
+        
+        <h3>API Keys Location</h3>
+        <p class="file-path">D:\Projects\ProjectGenesis\VIGA\utils\_api_keys.py</p>
+
+        <h3>Blender Path</h3>
+        <p class="file-path">C:\Program Files\Blender Foundation\Blender 4.5\blender.exe</p>
+
+        <h3>Run Command</h3>
+        <div class="code-block">
+cd D:/Projects/ProjectGenesis/VIGA
+python runners/dynamic_scene.py --task &lt;task_name&gt; --model gpt-4o \
+  --blender-command "C:/Program Files/Blender Foundation/Blender 4.5/blender.exe" \
+  --max-rounds 20
+        </div>
+    </div>
+
+    <footer style="text-align: center; margin-top: 40px; color: #7f8c8d;">
+        <p>Generated: January 30, 2026 00:10 PST</p>
+        <p>VIGA - Dynamic Scene Generation Pipeline</p>
+    </footer>
+</body>
+</html>
