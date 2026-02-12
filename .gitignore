@@ -17,6 +17,7 @@ logs
 chroma
 TODO.md
 *.jpg
+!docs/assets/*.jpg
 *.pdf
 *.mp4
 run.sh
