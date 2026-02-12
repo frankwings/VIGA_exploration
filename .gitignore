@@ -23,6 +23,7 @@ run.sh
 *.blend
 *.out
 *.bin
+*.pptx
 
 utils/infinigen
 utils/sam3
