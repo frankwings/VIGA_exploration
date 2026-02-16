@@ -525,6 +525,159 @@ def make_dashboard(objects, stats_before_all, stats_after_all, output_dir):
     plt.close()
 
 
+# Distinct colours per object for the scene overlay
+OBJECT_COLORS = [
+    (230, 25, 75),    # red
+    (60, 180, 75),    # green
+    (0, 130, 200),    # blue
+    (255, 225, 25),   # yellow
+    (245, 130, 48),   # orange
+    (145, 30, 180),   # purple
+    (70, 240, 240),   # cyan
+    (240, 50, 230),   # magenta
+    (210, 245, 60),   # lime
+    (250, 190, 212),  # pink
+    (0, 128, 128),    # teal
+    (220, 190, 255),  # lavender
+]
+
+
+def render_scene_2d_overlay(
+    verts_dict: dict[str, np.ndarray],
+    depth: np.ndarray,
+    fx, fy, cx, cy, H, W,
+    title: str,
+    output_path: Path,
+):
+    """Render all objects projected to 2D on top of the depth map.
+
+    Each object is drawn in a distinct colour. A legend maps colours to names.
+    """
+    # Normalise depth to 0-255 grey
+    dmin, dmax = depth.min(), depth.max()
+    depth_norm = ((depth - dmin) / (dmax - dmin + 1e-6) * 255).astype(np.uint8)
+    bg = np.stack([depth_norm, depth_norm, depth_norm], axis=-1)  # (H, W, 3)
+    canvas = bg.copy()
+
+    names = list(verts_dict.keys())
+    for idx, name in enumerate(names):
+        verts = verts_dict[name]
+        color = OBJECT_COLORS[idx % len(OBJECT_COLORS)]
+        verts_cv = pt3d_to_opencv(verts)
+        uv, z_v = project(verts_cv, fx, fy, cx, cy)
+        u_int = np.round(uv[:, 0]).astype(np.int32)
+        v_int = np.round(uv[:, 1]).astype(np.int32)
+        valid = (u_int >= 0) & (u_int < W) & (v_int >= 0) & (v_int < H) & (z_v > 0)
+
+        if valid.sum() == 0:
+            continue
+
+        u_v = u_int[valid]
+        v_v = v_int[valid]
+        z_valid = z_v[valid]
+
+        # Paint back-to-front (far first) so near objects occlude far ones
+        order = np.argsort(-z_valid)
+        canvas[v_v[order], u_v[order]] = color
+
+    # Draw legend in top-left corner
+    if Image:
+        img_pil = Image.fromarray(canvas)
+        draw = ImageDraw.Draw(img_pil)
+        try:
+            font = ImageFont.truetype("arial.ttf", 13)
+        except (OSError, IOError):
+            font = ImageFont.load_default()
+
+        draw.text((4, 4), title, fill=(255, 255, 255), font=font)
+
+        y0 = 24
+        for idx, name in enumerate(names):
+            color = OBJECT_COLORS[idx % len(OBJECT_COLORS)]
+            draw.rectangle([8, y0, 22, y0 + 14], fill=color)
+            draw.text((28, y0), name, fill=(255, 255, 255), font=font)
+            y0 += 18
+
+        img_pil.save(str(output_path))
+    else:
+        fig, ax = plt.subplots(figsize=(W / 100, H / 100), dpi=100)
+        ax.imshow(canvas)
+        ax.set_title(title, fontsize=10, color="white")
+        ax.axis("off")
+        fig.savefig(str(output_path), dpi=100, bbox_inches="tight", pad_inches=0)
+        plt.close()
+
+
+def render_scene_before_after(
+    verts_before_all: dict[str, np.ndarray],
+    verts_after_all: dict[str, np.ndarray],
+    depth: np.ndarray,
+    fx, fy, cx, cy, H, W,
+    output_path: Path,
+):
+    """Side-by-side before/after scene overlay on the depth map."""
+    dmin, dmax = depth.min(), depth.max()
+    depth_norm = ((depth - dmin) / (dmax - dmin + 1e-6) * 255).astype(np.uint8)
+    bg = np.stack([depth_norm, depth_norm, depth_norm], axis=-1)
+
+    names = list(verts_before_all.keys())
+
+    def paint(verts_dict):
+        canvas = bg.copy()
+        for idx, name in enumerate(names):
+            verts = verts_dict[name]
+            color = OBJECT_COLORS[idx % len(OBJECT_COLORS)]
+            verts_cv = pt3d_to_opencv(verts)
+            uv, z_v = project(verts_cv, fx, fy, cx, cy)
+            u_int = np.round(uv[:, 0]).astype(np.int32)
+            v_int = np.round(uv[:, 1]).astype(np.int32)
+            valid = (u_int >= 0) & (u_int < W) & (v_int >= 0) & (v_int < H) & (z_v > 0)
+            if valid.sum() == 0:
+                continue
+            u_v, v_v = u_int[valid], v_int[valid]
+            order = np.argsort(-z_v[valid])
+            canvas[v_v[order], u_v[order]] = color
+        return canvas
+
+    before_img = paint(verts_before_all)
+    after_img = paint(verts_after_all)
+
+    gap = 6
+    canvas_w = W * 2 + gap
+    canvas = np.ones((H + 50, canvas_w, 3), dtype=np.uint8) * 30  # dark background
+    canvas[50:, :W] = before_img
+    canvas[50:, W + gap:] = after_img
+
+    if Image:
+        img_pil = Image.fromarray(canvas)
+        draw = ImageDraw.Draw(img_pil)
+        try:
+            font = ImageFont.truetype("arial.ttf", 14)
+            font_sm = ImageFont.truetype("arial.ttf", 11)
+        except (OSError, IOError):
+            font = ImageFont.load_default()
+            font_sm = font
+
+        draw.text((W // 2 - 30, 4), "BEFORE ICP", fill=(255, 100, 100), font=font)
+        draw.text((W + gap + W // 2 - 30, 4), "AFTER ICP", fill=(100, 255, 100), font=font)
+
+        # Legend below titles
+        x0 = 8
+        for idx, name in enumerate(names):
+            color = OBJECT_COLORS[idx % len(OBJECT_COLORS)]
+            draw.rectangle([x0, 26, x0 + 10, 38], fill=color)
+            draw.text((x0 + 14, 25), name, fill=(200, 200, 200), font=font_sm)
+            x0 += len(name) * 7 + 26
+
+        img_pil.save(str(output_path))
+    else:
+        fig, ax = plt.subplots(figsize=(canvas_w / 100, (H + 50) / 100), dpi=100)
+        ax.imshow(canvas)
+        ax.axis("off")
+        fig.savefig(str(output_path), dpi=100, bbox_inches="tight", pad_inches=0)
+        plt.close()
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -652,20 +805,10 @@ def main():
         improvement = (stats_b.get("depth_error_rel_mean", 0) - stats_a.get("depth_error_rel_mean", 0))
         symbol = "+" if improvement > 0 else ""
 
-        # Safety: skip ICP if it made things worse
-        applied_icp = True
-        if improvement < 0:
-            print(f"  ICP made depth worse ({improvement:+.2%}), keeping original pose")
-            verts_aligned = verts.copy()
-            stats_a = stats_b
-            icp_info["transformation"] = np.eye(4).tolist()
-            icp_info["skipped"] = True
-            applied_icp = False
-        else:
-            print(f"  AFTER:  rel_err={stats_a.get('depth_error_rel_mean', 0):.2%}  "
-                  f"|err|={stats_a.get('depth_error_abs_mean', 0):.4f}  "
-                  f"ratio={stats_a.get('scale_ratio', 0):.4f}  "
-                  f"({symbol}{improvement:.2%} improvement)")
+        print(f"  AFTER:  rel_err={stats_a.get('depth_error_rel_mean', 0):.2%}  "
+              f"|err|={stats_a.get('depth_error_abs_mean', 0):.4f}  "
+              f"ratio={stats_a.get('scale_ratio', 0):.4f}  "
+              f"({symbol}{improvement:.2%} improvement)")
 
         verts_after_all[name] = verts_aligned.copy()
         stats_after_all[name] = stats_a
@@ -673,14 +816,13 @@ def main():
         # --- Save corrected GLB ---
         scene = load_glb_scene(glb_path)
         T_icp = np.array(icp_info["transformation"], dtype=np.float64)
-        if applied_icp:
-            for geom in scene.geometry.values():
-                if hasattr(geom, "vertices"):
-                    v = np.asarray(geom.vertices, dtype=np.float64)
-                    ones = np.ones((len(v), 1), dtype=np.float64)
-                    v_h = np.hstack([v, ones])
-                    v_aligned = (v_h @ T_icp.T)[:, :3]
-                    geom.vertices = v_aligned.astype(np.float32)
+        for geom in scene.geometry.values():
+            if hasattr(geom, "vertices"):
+                v = np.asarray(geom.vertices, dtype=np.float64)
+                ones = np.ones((len(v), 1), dtype=np.float64)
+                v_h = np.hstack([v, ones])
+                v_aligned = (v_h @ T_icp.T)[:, :3]
+                geom.vertices = v_aligned.astype(np.float32)
         out_glb = output_dir / f"{name}.glb"
         scene.export(str(out_glb))
 
@@ -734,6 +876,22 @@ def main():
     # --- Dashboard ---
     print("Generating dashboard...")
     make_dashboard(objects, stats_before_all, stats_after_all, output_dir)
+
+    # --- Scene 2D overlays ---
+    print("Rendering 2D scene overlays...")
+    render_scene_2d_overlay(
+        verts_before_all, depth, fx, fy, cx, cy, H, W,
+        "Before ICP", output_dir / "scene_2d_before.png",
+    )
+    render_scene_2d_overlay(
+        verts_after_all, depth, fx, fy, cx, cy, H, W,
+        "After ICP", output_dir / "scene_2d_after.png",
+    )
+    render_scene_before_after(
+        verts_before_all, verts_after_all, depth, fx, fy, cx, cy, H, W,
+        output_dir / "scene_2d_comparison.png",
+    )
+    print(f"  Saved: scene_2d_before.png, scene_2d_after.png, scene_2d_comparison.png")
 
     # --- Summary ---
     print()
