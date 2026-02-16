@@ -1,0 +1,312 @@
+# SAM3D Alignment Fix — Transform Bugs & Full Scene Reconstruction
+
+**Date:** 2026-02-15
+**Author:** kingy + Claude (Opus 4.6)
+**Hardware:** RTX 5080 16GB | 32GB DDR5-6000 | Ryzen 9 9900X
+
+---
+
+## Summary
+
+Fixed three critical bugs in `sam3d_worker.py` that caused SAM3D 3D reconstructions to be completely misaligned with their 2D input images. After fixes, re-ran TRELLIS for all segmented objects and rendered a full scene with correct camera parameters from MoGe. The final result shows 5 of 6 objects correctly positioned in 3D space matching the original 2D photograph.
+
+---
+
+## 1. Problem Statement
+
+The previous SAM3D pipeline produced GLBs that, when rendered, bore no resemblance to the original 2D segmented inputs:
+- Objects were displaced, rotated incorrectly, and scaled wrong
+- The rendered 3D scene did not match the spatial layout of the 2D photograph
+- Camera parameters from MoGe were not being used correctly
+
+The root cause was in `tools/sam3d/sam3d_worker.py`, specifically in the `Transform3d` replacement class and the vertex transformation chain.
+
+---
+
+## 2. Bugs Found and Fixed
+
+### Bug 1: Transform3d Translation — Row vs Column (Critical)
+
+The custom `Transform3d.translate()` stored translation in **column 3** instead of **row 3**, which is wrong for PyTorch3D's row-vector convention (`points_h @ M`).
+
+```python
+# BEFORE (broken) — translation stored in column 3
+def translate(self, x, y, z):
+    T = torch.eye(4)
+    T[0, 3] = x   # ← wrong
+    T[1, 3] = y   # ← wrong
+    T[2, 3] = z   # ← wrong
+    self._matrix = self._matrix @ T
+
+# AFTER (fixed) — translation stored in row 3
+def translate(self, x, y, z):
+    T = torch.eye(4)
+    T[3, 0] = x   # ← correct for row-vector convention
+    T[3, 1] = y
+    T[3, 2] = z
+    self._matrix = self._matrix @ T
+```
+
+**Impact:** Translation was completely lost — objects were all placed at origin regardless of their MoGe-predicted 3D position.
+
+### Bug 2: Wrong Pre-Transform Sign
+
+The pre-transform matrix had a negated X-axis that shouldn't have been there.
+
+```python
+# BEFORE (wrong sign on X)
+R_zup_to_yup = [[-1, 0, 0], [0, 0, 1], [0, -1, 0]]
+
+# AFTER (correct)
+R_zup_to_yup = [[1, 0, 0], [0, 0, 1], [0, -1, 0]]
+```
+
+**Impact:** All X-coordinates were negated, mirroring the entire mesh.
+
+### Bug 3: Dead Post-Transforms (Identity Matrix)
+
+Three sequential rotation matrices (`R_pytorch3d_to_cam @ R_flip_y @ R_flip_x`) multiplied out to the identity matrix — they were doing nothing but adding complexity.
+
+```python
+# BEFORE — three matrices that cancel each other
+R_pytorch3d_to_cam = [[-1,0,0],[0,1,0],[0,0,-1]]
+R_flip_y = [[-1,0,0],[0,1,0],[0,0,-1]]
+R_flip_x = [[1,0,0],[0,-1,0],[0,0,1]]   # not actually used
+# Product = Identity
+
+# AFTER — removed entirely
+# Simplified to: pre-transform → S@R+T only
+```
+
+**Impact:** No functional impact (identity), but added confusion and code complexity.
+
+### Commit
+
+All three fixes committed as `d82b86e`: *"Fix SAM3D vertex transform bugs and add alignment diagnostics"*
+
+---
+
+## 3. Render Axis Corrections
+
+After fixing the transform bugs, two additional axis mismatches were discovered during rendering:
+
+### Vertical Flip (Y-axis)
+
+OpenCV uses **Y-down** but Blender's camera convention is **Y-up**. Rendered images were upside-down.
+
+**Fix:** Added `flip_image()` post-processing in Blender render scripts that reverses row order.
+
+### Horizontal Flip (X-axis)
+
+PyTorch3D uses **X-left** but OpenCV/Blender use **X-right**. All off-center objects appeared horizontally mirrored.
+
+**Fix:** Extended `flip_image()` to also reverse pixel order within each row.
+
+```python
+def flip_image(path):
+    """Flip vertically (Y) and horizontally (X).
+    Vertical: OpenCV Y-down vs Blender camera Y-up.
+    Horizontal: PyTorch3D X-left vs OpenCV/Blender X-right.
+    """
+    img = bpy.data.images.load(path)
+    w, h = img.size
+    pixels = list(img.pixels)
+    px = 4  # RGBA
+    stride = w * px
+    flipped = []
+    for row in range(h - 1, -1, -1):          # vertical flip
+        row_data = pixels[row * stride:(row + 1) * stride]
+        reversed_row = []
+        for col in range(w - 1, -1, -1):       # horizontal flip
+            reversed_row.extend(row_data[col * px:(col + 1) * px])
+        flipped.extend(reversed_row)
+    img.pixels = flipped
+    img.save_render(path)
+    bpy.data.images.remove(img)
+```
+
+### Commit
+
+Committed as `c1688b8`: *"Fix horizontal mirror: PyTorch3D X-left vs OpenCV X-right"*
+
+---
+
+## 4. Coordinate System Reference
+
+The full transform chain from MoGe pointmap to final rendered pixel:
+
+```
+MoGe (OpenCV)          PyTorch3D Camera        glTF (Y-up)           Blender (Z-up)
+X-right, Y-down        X-left, Y-up            X-right, Y-up         X-right, Y-forward
+Z-forward              Z-forward               Z-backward            Z-up
+        │                      │                       │                      │
+        └──── sam3d_worker ────┘                       └──── GLB import ──────┘
+              (S@R+T)                                    (auto Y→Z swap)
+                                                                │
+                                                    Camera Rx(-90°) at origin
+                                                    looks along -Y_blender
+                                                                │
+                                                    Render + flip(V,H)
+                                                                │
+                                                          Final PNG
+```
+
+Key conventions:
+| System | X | Y | Z | Handedness |
+|---|---|---|---|---|
+| OpenCV | Right | Down | Forward | Right-handed |
+| PyTorch3D | **Left** | Up | Forward | Right-handed |
+| glTF | Right | Up | Backward | Right-handed |
+| Blender | Right | Forward | Up | Right-handed |
+
+---
+
+## 5. Re-Run Results
+
+### TRELLIS Reconstruction (5 of 6 objects)
+
+Re-ran TRELLIS for all 6 segmented objects from the greentea scene using the fixed `sam3d_worker.py`.
+
+| Object | TRELLIS Status | Time | Sparse Coords |
+|---|---|---|---|
+| green_tea_bottle_1 (bottle) | Completed | ~6 min | 9,613 |
+| alienware_keyboard_1 | Completed | ~6 min | 10,437 |
+| alienware_keyboard | Completed | ~6 min | — |
+| envelope | Completed | ~5 min | — |
+| green_tea_bottle (desk surface) | Completed | ~7 min | — |
+| headphones | **Failed** (decode hung >15 min) | killed | 24,032 |
+
+The headphones object had the most complex geometry (24K sparse coords) and hung during the decode stage. All other objects completed successfully.
+
+### MoGe Camera Intrinsics (Full Target Image)
+
+```
+fx = 940.7 px    fy = 940.7 px
+cx = 385.5 px    cy = 512.0 px
+Image: 771 × 1024 px
+```
+
+### Object Transforms
+
+All transforms stored in `output/sam3d_rerun_fixed/object_transforms.json`:
+
+| Object | Translation (X, Y, Z) | Scale | Notes |
+|---|---|---|---|
+| alienware_keyboard | (-0.408, 0.200, 1.793) | 0.723 | Right half of keyboard |
+| alienware_keyboard_1 | (0.497, 0.265, 1.780) | 0.603 | Left half of keyboard |
+| envelope | (0.456, 0.712, 2.299) | 0.499 | Mail envelope |
+| green_tea_bottle | (0.053, -0.449, 1.441) | 2.003 | Desk surface segment |
+| green_tea_bottle_1 | (0.022, -0.007, 1.193) | 1.001 | Ito En bottle |
+
+Note: Translations are in PyTorch3D camera space (X-left, Y-up, Z-forward). The render scripts apply axis flips to convert to standard image coordinates.
+
+---
+
+## 6. Per-Object Alignment Results
+
+### green_tea_bottle_1 (Ito En Bottle) — Best Result
+
+![green_tea_bottle_1_compare](../output/sam3d_rerun_fixed/green_tea_bottle_1_compare.png)
+
+- Shape: Excellent — recognizable bottle with cap, label, body
+- Position: Centered, matches 2D input
+- Orientation: Correct (cap at top)
+
+### alienware_keyboard (Right Half)
+
+![alienware_keyboard_compare](../output/sam3d_rerun_fixed/alienware_keyboard_compare.png)
+
+- Shape: Good keyboard section with visible keys
+- Position: Right side of frame, matches 2D input
+- Note: 3D is more boxy than the angled 2D perspective
+
+### alienware_keyboard_1 (Left Half)
+
+![alienware_keyboard_1_compare](../output/sam3d_rerun_fixed/alienware_keyboard_1_compare.png)
+
+- Shape: Good keyboard section
+- Position: Left side of frame, matches 2D input
+- Note: Slightly different vertical position than 2D
+
+### envelope
+
+![envelope_compare](../output/sam3d_rerun_fixed/envelope_compare.png)
+
+- Shape: Good flat shape with correct tilt angle
+- Position: Upper-left area, matches 2D input
+- Note: Good overall match
+
+### green_tea_bottle (Desk Surface)
+
+![green_tea_bottle_compare](../output/sam3d_rerun_fixed/green_tea_bottle_compare.png)
+
+- Shape: Large flat surface (desk segment)
+- Position: Bottom area, matches 2D input
+- Note: This is the desk, not the bottle — SAM named it after the dominant texture
+
+---
+
+## 7. Full Scene Comparison
+
+![full_scene_comparison](../output/sam3d_rerun_fixed/full_scene_comparison.png)
+
+**Left:** Original target photograph
+**Right:** 3D render of all 5 reconstructed objects placed using MoGe camera + SAM3D transforms
+
+The overall spatial layout matches: bottle in the foreground center, keyboard behind it, envelope in the upper area, desk surface as the background plane. The headphones (upper-right in the 2D image) are missing due to the TRELLIS decode failure.
+
+---
+
+## 8. Files Created / Modified
+
+### Modified
+
+| File | Change |
+|---|---|
+| `tools/sam3d/sam3d_worker.py` | Fixed 3 transform bugs (translation row, pre-transform sign, dead post-transforms) |
+| `diagnose_render_glb.py` | Added vertical + horizontal flip for correct axis mapping |
+
+### Created
+
+| File | Purpose |
+|---|---|
+| `render_full_scene.py` | Renders all GLBs in one Blender scene with MoGe camera |
+| `rerun_sam3d.py` | Batch re-runs TRELLIS for all segmented objects |
+| `diagnose_moge.py` | Runs MoGe on images to extract camera intrinsics |
+| `make_comparison.py` | Creates side-by-side 2D vs 3D comparison images |
+| `tools/sam3d/object_sizing.py` | Real-world size mapping for common objects |
+
+### Output Data
+
+```
+output/sam3d_rerun_fixed/
+├── object_transforms.json          # Combined transforms for all 5 objects
+├── target_moge.npz                 # MoGe intrinsics from full target image
+├── *.glb                           # 5 reconstructed GLB files
+├── *_render.png                    # Individual object renders
+├── *_compare.png                   # Per-object 2D vs 3D comparisons
+├── full_scene_render.png           # All objects in one scene
+├── full_scene_comparison.png       # Full scene vs target image
+└── *_sam3d.log                     # TRELLIS inference logs
+```
+
+---
+
+## 9. Git History
+
+| Commit | Message |
+|---|---|
+| `0f411c5` | Improve pipeline with enhanced prompts, SAM3D mask filtering, and rendering fixes |
+| `d82b86e` | Fix SAM3D vertex transform bugs and add alignment diagnostics |
+| `73d6a11` | Add full scene rendering pipeline with vertical flip fix |
+| `c1688b8` | Fix horizontal mirror: PyTorch3D X-left vs OpenCV X-right |
+
+---
+
+## 10. Known Issues & Next Steps
+
+1. **Headphones failed** — TRELLIS decode hung for >15 min on this object (24K sparse coords, highest complexity). Could retry with a timeout or reduced SLAT steps.
+2. **Mesh is mirrored in 3D** — The horizontal flip is currently applied at render time. For correct GLB files, the X-axis negation should be applied in `sam3d_worker.py` (with face winding correction) so GLBs are correct in any viewer.
+3. **Texture quality** — TRELLIS reconstructions are recognizable but textures are softer/less detailed than 2D inputs. This is inherent to the feed-forward reconstruction approach.
+4. **Object naming** — SAM's VLM naming assigned "green_tea_bottle" to the desk surface because the bottle texture was prominent. Better filtering or manual override would improve this.
+5. **Common-sense sizing** — `object_sizing.py` defines real-world sizes (bottle ~20cm, keyboard ~45cm) but these are not yet integrated into the render pipeline.
