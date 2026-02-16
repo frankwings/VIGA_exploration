@@ -8,7 +8,7 @@
 
 ## Summary
 
-Fixed three critical bugs in `sam3d_worker.py` that caused SAM3D 3D reconstructions to be completely misaligned with their 2D input images. After fixes, re-ran TRELLIS for all segmented objects and rendered a full scene with correct camera parameters from MoGe. The final result shows 5 of 6 objects correctly positioned in 3D space matching the original 2D photograph.
+Fixed three critical bugs in `sam3d_worker.py` that caused SAM3D 3D reconstructions to be completely misaligned with their 2D input images. After fixes, re-ran TRELLIS for all segmented objects and rendered a full scene with correct camera parameters from MoGe. The final result shows all 6 objects correctly positioned in 3D space matching the original 2D photograph.
 
 ---
 
@@ -19,7 +19,13 @@ The previous SAM3D pipeline produced GLBs that, when rendered, bore no resemblan
 - The rendered 3D scene did not match the spatial layout of the 2D photograph
 - Camera parameters from MoGe were not being used correctly
 
-The root cause was in `tools/sam3d/sam3d_worker.py`, specifically in the `Transform3d` replacement class and the vertex transformation chain.
+### Root Cause: Custom Transform3d Shim, Not SAM3D Itself
+
+**The bugs were NOT in SAM3D/TRELLIS or MoGe.** SAM3D's pipeline already includes MoGe for monocular geometry estimation, and the upstream code correctly estimates 3D geometry, camera intrinsics, and per-object transforms (scale, rotation, translation).
+
+The problem was in `tools/sam3d/sam3d_worker.py` — our **custom wrapper** that integrates SAM3D into the VIGA pipeline. The original SAM3D code depends on `pytorch3d.transforms.Transform3d`, but PyTorch3D could not be installed on this setup (RTX 5080 + Windows + CUDA compatibility issues). So `sam3d_worker.py` includes a **custom reimplementation** of the `Transform3d` class to avoid the dependency. That custom class, and the vertex transformation chain around it, contained the three bugs described below.
+
+In short: SAM3D + MoGe produce correct 3D data. Our PyTorch3D-free `Transform3d` shim applied the transforms incorrectly when writing the GLB files.
 
 ---
 
