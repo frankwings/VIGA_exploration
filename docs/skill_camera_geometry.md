@@ -425,7 +425,110 @@ The `points` array satisfies: `points[v, u] = K^{-1} @ [u, v, 1] * depth[v, u]`
 
 ---
 
-## 10. Lessons Learned (SAM3D Pipeline)
+## 10. Camera Anatomy (H&Z Table 6.1)
+
+For `P = [M | p4]` with rows `P_i^T`:
+
+| Property | Formula | Description |
+|---|---|---|
+| Camera center | `PC = 0` | Right null-space of P |
+| Principal point | `x0 = M @ m3` | m3 = 3rd row of M |
+| Principal ray | Direction `m3^T` from C | The optical axis direction |
+| Image of origin | `p4` (4th column) | Where world origin projects |
+| Vanishing points | `p1, p2, p3` (columns 1-3) | Images of X,Y,Z axis directions |
+
+### Depth of a Point (H&Z Result 6.1, eq 6.15)
+
+For `P = [M | p4]` and point `X = (X, Y, Z, T)^T`, if `PX = w(x, y, 1)^T`:
+
+```
+depth(X; P) = sign(det M) * w / (T * ||m3||)
+```
+
+Positive depth means the point is in front of the camera.
+
+### Back-projection to Ray (H&Z eq 6.14)
+
+An image point `x` back-projects to a ray through the camera center:
+
+```
+X(mu) = [M^{-1}(mu*x - p4); 1]    (parametric, mu varies)
+```
+
+General form: `X(lambda) = P^+ @ x + lambda * C` where `P^+ = P^T @ (P @ P^T)^{-1}`.
+
+---
+
+## 11. Transformation Rules for Geometric Entities
+
+**Points transform contravariantly, lines/planes transform covariantly:**
+
+| Entity | Forward transform | Inverse required? |
+|---|---|---|
+| Points | `x' = H @ x` | No |
+| Lines (2D) | `l' = H^{-T} @ l` | Yes |
+| Planes (3D) | `pi' = H^{-T} @ pi` | Yes |
+| Conics | `C' = H^{-T} @ C @ H^{-1}` | Yes |
+| Dual conics | `C*' = H @ C* @ H^T` | No |
+
+### Camera Action on Lines and Planes
+
+```python
+# Image line back-projects to a plane:
+pi = P.T @ l                    # H&Z Result 8.2
+
+# Quadric projects to image conic:
+C_star = P @ Q_star @ P.T       # H&Z eq 8.5
+```
+
+---
+
+## 12. Vanishing Points & Calibration (H&Z Chapter 8)
+
+### Vanishing Point
+
+Lines with direction `d` in 3-space have vanishing point:
+```
+v = K @ d
+```
+The vanishing point depends only on the direction, not position.
+
+### Angle Between Directions from Vanishing Points
+
+```
+cos(theta) = (v1^T @ omega @ v2) / sqrt((v1^T @ omega @ v1)(v2^T @ omega @ v2))
+```
+
+where `omega = (K @ K^T)^{-1}` is the **Image of the Absolute Conic (IAC)**.
+
+### IAC for Auto-Calibration (H&Z Result 8.17)
+
+```
+omega  = K^{-T} @ K^{-1}       # IAC — depends ONLY on K, not pose
+omega* = K @ K^T                # Dual IAC (DIAC)
+```
+
+Key properties:
+- Orthogonal directions satisfy: `d1^T @ omega @ d2 = 0`
+- K recoverable from omega via Cholesky factorization of `omega^{-1}`
+- IAC is invariant to camera position/orientation — only depends on intrinsics
+
+---
+
+## 13. Camera Type Hierarchy
+
+| Camera Type | Form | DOF | Key Property |
+|---|---|---|---|
+| Basic pinhole | `diag(f,f,1)[I\|0]` | 1 | Equal focal lengths, no offset |
+| + principal point | `K[I\|0]` (K eq 6.4) | 3 | Principal point added |
+| General pinhole | `KR[I\|-C]` (eq 6.7) | 9 | Rotation + translation |
+| CCD camera | K with m_x != m_y (eq 6.9) | 10 | Non-square pixels |
+| Finite projective | K with skew (eq 6.10) | 11 | Adds skew parameter |
+| Affine camera | Last row `(0,0,0,1)` | 8 | Center at infinity, parallel projection |
+
+---
+
+## 14. Lessons Learned (SAM3D Pipeline)
 
 ### Bug Pattern: Row vs Column Translation
 
