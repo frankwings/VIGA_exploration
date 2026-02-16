@@ -87,7 +87,7 @@ class Transform3d:
         B, N, _ = points.shape
         ones = torch.ones(B, N, 1, dtype=self.dtype, device=self.device)
         points_h = torch.cat([points, ones], dim=-1)  # (B, N, 4)
-        transformed = points_h @ self._matrix.T  # (B, N, 4)
+        transformed = points_h @ self._matrix  # (B, N, 4)
         return transformed[..., :3]  # (B, N, 3)
 
 ROOT: str = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -198,12 +198,26 @@ def main() -> None:
     os.makedirs(os.path.dirname(args.glb), exist_ok=True)
     mesh.export(args.glb)
 
+    # Extract camera intrinsics if available (from MoGe pointmap estimation)
+    intrinsics_data = {}
+    if "intrinsics" in output:
+        intrinsics = output["intrinsics"]
+        if hasattr(intrinsics, 'cpu'):
+            intrinsics = intrinsics.cpu().float()
+        intrinsics_data["intrinsics"] = intrinsics.tolist()
+    if "pointmap" in output:
+        # Pointmap shape gives image dimensions used by MoGe
+        pm = output["pointmap"]
+        if hasattr(pm, 'shape'):
+            intrinsics_data["pointmap_shape"] = list(pm.shape)
+
     # Prepare output data
     translation_data = {
         "glb_path": args.glb,
         "translation": T.tolist(),
         "rotation": R.tolist(),
-        "scale": S.tolist()
+        "scale": S.tolist(),
+        **intrinsics_data,
     }
 
     # Write to file if --info provided, otherwise print to stdout for backward compatibility
