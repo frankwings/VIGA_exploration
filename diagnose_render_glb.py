@@ -202,7 +202,24 @@ def main():
     os.makedirs(os.path.dirname(args["output_png"]), exist_ok=True)
     bpy.context.scene.render.filepath = args["output_png"]
     bpy.ops.render.render(write_still=True)
-    print(f"[INFO] Rendered: {args['output_png']}")
+
+    # Flip vertically: OpenCV Y-down vs Blender camera Y-up causes vertical inversion
+    flip_image(args["output_png"])
+    print(f"[INFO] Rendered (flipped): {args['output_png']}")
+
+
+def flip_image(path):
+    """Flip rendered image vertically to correct OpenCV/Blender Y-axis mismatch."""
+    img = bpy.data.images.load(path)
+    w, h = img.size
+    pixels = list(img.pixels)  # flat RGBA list
+    stride = w * 4
+    flipped = []
+    for row in range(h - 1, -1, -1):
+        flipped.extend(pixels[row * stride:(row + 1) * stride])
+    img.pixels = flipped
+    img.save_render(path)
+    bpy.data.images.remove(img)
 
 
 if __name__ == "__main__":
