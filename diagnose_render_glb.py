@@ -209,14 +209,24 @@ def main():
 
 
 def flip_image(path):
-    """Flip rendered image vertically to correct OpenCV/Blender Y-axis mismatch."""
+    """Flip rendered image vertically and horizontally.
+
+    Vertical flip: OpenCV Y-down vs Blender camera Y-up.
+    Horizontal flip: PyTorch3D X-left vs OpenCV/Blender X-right.
+    """
     img = bpy.data.images.load(path)
     w, h = img.size
     pixels = list(img.pixels)  # flat RGBA list
-    stride = w * 4
+    px = 4  # RGBA channels per pixel
+    stride = w * px
     flipped = []
     for row in range(h - 1, -1, -1):
-        flipped.extend(pixels[row * stride:(row + 1) * stride])
+        row_data = pixels[row * stride:(row + 1) * stride]
+        # Reverse pixel order within the row (horizontal flip)
+        reversed_row = []
+        for col in range(w - 1, -1, -1):
+            reversed_row.extend(row_data[col * px:(col + 1) * px])
+        flipped.extend(reversed_row)
     img.pixels = flipped
     img.save_render(path)
     bpy.data.images.remove(img)

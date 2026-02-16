@@ -121,14 +121,23 @@ def setup_render(width, height):
 
 
 def flip_image(path):
-    """Flip vertically to correct OpenCV Y-down convention."""
+    """Flip rendered image vertically and horizontally.
+
+    Vertical flip: OpenCV Y-down vs Blender camera Y-up.
+    Horizontal flip: PyTorch3D X-left vs OpenCV/Blender X-right.
+    """
     img = bpy.data.images.load(path)
     w, h = img.size
     pixels = list(img.pixels)
-    stride = w * 4
+    px = 4  # RGBA channels per pixel
+    stride = w * px
     flipped = []
     for row in range(h - 1, -1, -1):
-        flipped.extend(pixels[row * stride:(row + 1) * stride])
+        row_data = pixels[row * stride:(row + 1) * stride]
+        reversed_row = []
+        for col in range(w - 1, -1, -1):
+            reversed_row.extend(row_data[col * px:(col + 1) * px])
+        flipped.extend(reversed_row)
     img.pixels = flipped
     img.save_render(path)
     bpy.data.images.remove(img)
