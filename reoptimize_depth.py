@@ -131,7 +131,126 @@ def compute_masked_depth_error(verts_pt3d, mask, depth, fx, fy, cx, cy, H, W):
 
 
 # ---------------------------------------------------------------------------
-# Re-optimization (fixes issue #2)
+# Ray-cast mesh to get per-pixel depth
+# ---------------------------------------------------------------------------
+
+def raycast_mesh_depth(
+    glb_path: Path,
+    mask: np.ndarray,
+    fx: float, fy: float, cx: float, cy: float,
+    H: int, W: int,
+    max_rays: int = 10000,
+    max_faces: int = 8000,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Cast rays from camera through mask pixels, intersect with mesh.
+
+    The mesh is in PyTorch3D camera space.  We convert to OpenCV for
+    ray generation, then cast rays through the mesh in OpenCV space.
+
+    High-poly meshes are simplified to max_faces triangles before
+    ray-casting to avoid OOM in trimesh's ray-triangle intersection.
+
+    Returns:
+        pixel_rows:  (N,) row indices of mask pixels that hit the mesh
+        pixel_cols:  (N,) col indices
+        hit_depths:  (N,) depth (Z) at each hit in OpenCV space
+    """
+    mask_bool = mask > 127 if mask.dtype == np.uint8 else mask > 0.5
+
+    # Get mask pixel coordinates
+    rows, cols = np.where(mask_bool)
+    n_mask = len(rows)
+    if n_mask == 0:
+        return np.array([]), np.array([]), np.array([])
+
+    # Subsample if too many pixels
+    if n_mask > max_rays:
+        idx = np.random.default_rng(42).choice(n_mask, max_rays, replace=False)
+        rows, cols = rows[idx], cols[idx]
+
+    # Build rays in OpenCV camera space: origin at (0,0,0), direction through each pixel
+    dx = (cols.astype(np.float64) - cx) / fx
+    dy = (rows.astype(np.float64) - cy) / fy
+    dz = np.ones_like(dx)
+    directions = np.stack([dx, dy, dz], axis=-1)
+    norms = np.linalg.norm(directions, axis=-1, keepdims=True)
+    directions /= norms
+
+    origins = np.zeros_like(directions)
+
+    # Load mesh and convert to OpenCV space for ray intersection
+    scene = trimesh.load(str(glb_path), force="scene")
+    all_verts = []
+    all_faces = []
+    face_offset = 0
+    for geom in scene.geometry.values():
+        if hasattr(geom, "vertices") and hasattr(geom, "faces"):
+            v = np.asarray(geom.vertices, dtype=np.float64)
+            f = np.asarray(geom.faces, dtype=np.int64) + face_offset
+            all_verts.append(v)
+            all_faces.append(f)
+            face_offset += len(v)
+
+    if not all_verts:
+        return np.array([]), np.array([]), np.array([])
+
+    verts = np.concatenate(all_verts, axis=0)
+    faces = np.concatenate(all_faces, axis=0)
+
+    # PT3D -> OpenCV
+    verts_cv = verts.copy()
+    verts_cv[:, 0] = -verts[:, 0]
+    verts_cv[:, 1] = -verts[:, 1]
+
+    mesh_cv = trimesh.Trimesh(vertices=verts_cv, faces=faces, process=False)
+
+    # Simplify high-poly meshes to avoid OOM in ray-triangle intersection
+    # trimesh's ray_triangle allocates (n_faces * n_rays, 3) which can be huge
+    n_faces = len(mesh_cv.faces)
+    if n_faces > max_faces:
+        print(f"    Simplifying mesh: {n_faces} -> {max_faces} faces")
+        try:
+            import fast_simplification
+            pts_s, tri_s = fast_simplification.simplify(
+                np.asarray(mesh_cv.vertices, dtype=np.float64),
+                np.asarray(mesh_cv.faces, dtype=np.int32),
+                target_count=max_faces,
+            )
+            mesh_cv = trimesh.Trimesh(vertices=pts_s, faces=tri_s, process=False)
+            print(f"    After simplification: {len(mesh_cv.faces)} faces")
+        except Exception as e:
+            # Fallback: reduce rays so n_faces * n_rays < 100M
+            print(f"    Simplification failed ({e}), reducing rays instead")
+            safe_rays = min(len(rows), max(500, 100_000_000 // n_faces))
+            if safe_rays < len(rows):
+                idx = np.random.default_rng(42).choice(len(rows), safe_rays, replace=False)
+                rows, cols = rows[idx], cols[idx]
+                dx = (cols.astype(np.float64) - cx) / fx
+                dy = (rows.astype(np.float64) - cy) / fy
+                dz = np.ones_like(dx)
+                directions = np.stack([dx, dy, dz], axis=-1)
+                norms = np.linalg.norm(directions, axis=-1, keepdims=True)
+                directions /= norms
+                origins = np.zeros_like(directions)
+                print(f"    Reduced rays to {safe_rays}")
+
+    # Ray-cast
+    locations, index_ray, index_tri = mesh_cv.ray.intersects_location(
+        ray_origins=origins, ray_directions=directions, multiple_hits=False
+    )
+
+    if len(locations) == 0:
+        return np.array([]), np.array([]), np.array([])
+
+    hit_depths = locations[:, 2]  # Z in OpenCV = depth
+    hit_rows = rows[index_ray]
+    hit_cols = cols[index_ray]
+
+    return hit_rows, hit_cols, hit_depths
+
+
+# ---------------------------------------------------------------------------
+# Re-optimization using per-pixel depth (closed-form least squares)
 # ---------------------------------------------------------------------------
 
 def optimize_object_pose(
@@ -141,91 +260,126 @@ def optimize_object_pose(
     fx: float, fy: float, cx: float, cy: float,
     H: int, W: int,
     centroid_pt3d: np.ndarray,
+    glb_path: Path = None,
     lambda_depth: float = 1.0,
     lambda_mask: float = 0.5,
     lambda_reg: float = 0.01,
+    max_ds: float = 0.25,
+    skip_threshold: float = 0.03,
 ) -> dict:
-    """Optimize a translation + scale correction to improve depth alignment.
+    """Optimize translation + scale correction using ALL mask pixel depths.
 
-    Parameterizes correction as:
-        v_corrected = (v - centroid) * (1 + ds) + centroid + dt
+    1. Ray-cast mesh to get per-pixel depth at mask pixels
+    2. Solve closed-form least squares for (dt_z, ds):
+         z_corrected = (z_mesh - z_centroid) * (1 + ds) + z_centroid + dt_z
+       which is linear in (dt_z, ds).
 
-    where ds is a scalar scale correction and dt is a 3D translation correction.
-    Uses aggressive subsampling (~2K verts) and Nelder-Mead for speed.
+    ds is clamped to [-max_ds, +max_ds] to prevent extreme scale changes.
+    Objects with rel_err < skip_threshold are skipped (already well-aligned).
     """
-    mask_bool = mask > 127 if mask.dtype == np.uint8 else mask > 0.5
+    if glb_path is None:
+        return _optimize_vertex_only(
+            verts_pt3d, mask, depth, fx, fy, cx, cy, H, W, centroid_pt3d
+        )
 
-    # Aggressive subsample for speed — 2K vertices is plenty for pose correction
-    n = len(verts_pt3d)
-    step = max(1, n // 2000)
-    verts_sub = verts_pt3d[::step].copy()
-    offset = verts_sub - centroid_pt3d  # precompute
+    # Check if already well-aligned: skip optimization for good objects
+    quick_stats = compute_masked_depth_error(
+        verts_pt3d, mask > 127 if mask.dtype == np.uint8 else mask > 0.5,
+        depth, fx, fy, cx, cy, H, W
+    )
+    rel_err = quick_stats.get("depth_error_rel_mean", 1.0)
+    if rel_err < skip_threshold:
+        print(f"    Skipping optimization (rel_err={rel_err:.2%} < {skip_threshold:.0%} threshold)")
+        return {"dt": [0.0, 0.0, 0.0], "ds": 0.0, "loss": 0.0, "success": True, "niter": 0, "n_rays": 0}
 
-    # Precompute mask flat lookup for fast indexing
-    mask_flat = mask_bool.ravel()
-
-    def objective(params):
-        dt_x, dt_y, dt_z, ds = params
-
-        # Apply correction: v = offset * (1+ds) + centroid + dt
-        v_x = offset[:, 0] * (1.0 + ds) + centroid_pt3d[0] + dt_x
-        v_y = offset[:, 1] * (1.0 + ds) + centroid_pt3d[1] + dt_y
-        v_z = offset[:, 2] * (1.0 + ds) + centroid_pt3d[2] + dt_z
-
-        # PT3D->OpenCV + project (fused, no allocation)
-        z = v_z  # Z stays same
-        u = fx * (-v_x) / z + cx
-        v = fy * (-v_y) / z + cy
-
-        u_int = np.rint(u).astype(np.intp)
-        v_int = np.rint(v).astype(np.intp)
-
-        in_bounds = (u_int >= 0) & (u_int < W) & (v_int >= 0) & (v_int < H) & (z > 0)
-        ib_idx = np.where(in_bounds)[0]
-
-        if len(ib_idx) == 0:
-            return 100.0  # bad pose
-
-        u_ib = u_int[ib_idx]
-        v_ib = v_int[ib_idx]
-        flat_idx = v_ib * W + u_ib
-
-        in_mask = mask_flat[flat_idx]
-        mask_idx = ib_idx[in_mask]
-
-        # Depth loss (within mask)
-        depth_loss = 0.0
-        if len(mask_idx) > 5:
-            z_v = z[mask_idx]
-            z_m = depth[v_int[mask_idx], u_int[mask_idx]]
-            err = z_v - z_m
-            depth_loss = float(np.mean(err * err))
-
-        # Mask loss: fraction of in-bounds vertices outside mask
-        mask_loss = 1.0 - len(mask_idx) / len(ib_idx)
-
-        # Regularization
-        reg_loss = dt_x * dt_x + dt_y * dt_y + dt_z * dt_z + ds * ds
-
-        return lambda_depth * depth_loss + lambda_mask * mask_loss + lambda_reg * reg_loss
-
-    # Use Nelder-Mead: no gradients needed, fast for 4 params
-    x0 = np.zeros(4)
-    result = minimize(
-        objective, x0, method="Nelder-Mead",
-        options={"maxiter": 300, "xatol": 1e-5, "fatol": 1e-8, "adaptive": True},
+    # Step 1: Ray-cast to get mesh depth at mask pixels
+    hit_rows, hit_cols, z_mesh = raycast_mesh_depth(
+        glb_path, mask, fx, fy, cx, cy, H, W, max_rays=15000
     )
 
-    dt = result.x[:3]
-    ds = result.x[3]
+    if len(z_mesh) < 20:
+        print(f"    WARNING: Only {len(z_mesh)} ray hits, falling back to vertex-only")
+        return _optimize_vertex_only(
+            verts_pt3d, mask, depth, fx, fy, cx, cy, H, W, centroid_pt3d
+        )
+
+    # Step 2: Get MoGe depth at the same pixels
+    z_moge = depth[hit_rows, hit_cols].astype(np.float64)
+    z_mesh = z_mesh.astype(np.float64)
+
+    z_centroid = float(centroid_pt3d[2])  # Z in PT3D = Z in OpenCV
+
+    print(f"    Ray-cast: {len(z_mesh)} hits, "
+          f"mesh_z=[{z_mesh.min():.3f},{z_mesh.max():.3f}], "
+          f"moge_z=[{z_moge.min():.3f},{z_moge.max():.3f}]")
+
+    # Step 3: Closed-form least squares
+    # z_corrected = z_mesh + (z_mesh - z_centroid) * ds + dt_z
+    # Minimize: ||z_corrected - z_moge||^2 + lambda_reg * (ds^2 + dt_z^2)
+    a = z_mesh - z_centroid  # (N,)
+    b = z_moge - z_mesh       # (N,)
+    N = len(a)
+
+    # Build regularized least squares: [A; sqrt(reg)*I] @ x = [b; 0]
+    reg_w = np.sqrt(lambda_reg * N)
+    A = np.column_stack([a, np.ones(N)])  # (N, 2)
+    A_reg = np.vstack([A, reg_w * np.eye(2)])
+    b_reg = np.concatenate([b, np.zeros(2)])
+
+    x, residuals, rank, sv = np.linalg.lstsq(A_reg, b_reg, rcond=None)
+    ds = float(np.clip(x[0], -max_ds, max_ds))
+    dt_z = float(x[1])
+
+    # If ds was clamped, re-solve for dt_z alone with ds fixed
+    if abs(x[0]) > max_ds:
+        print(f"    Clamped ds from {x[0]:+.4f} to {ds:+.4f}, re-solving dt_z")
+        residual_after_ds = b - a * ds  # what dt_z needs to fix
+        dt_z = float(np.median(residual_after_ds))  # robust median
+
+    # Compute loss for reporting
+    z_corrected = z_mesh + a * ds + dt_z
+    err = z_corrected - z_moge
+    loss = float(np.mean(err**2))
 
     return {
-        "dt": dt.tolist(),
-        "ds": float(ds),
-        "loss": float(result.fun),
-        "success": bool(result.success),
-        "niter": int(result.nit),
+        "dt": [0.0, 0.0, dt_z],
+        "ds": ds,
+        "loss": loss,
+        "success": True,
+        "niter": 1,
+        "n_rays": len(z_mesh),
     }
+
+
+def _optimize_vertex_only(verts_pt3d, mask, depth, fx, fy, cx, cy, H, W, centroid_pt3d):
+    """Fallback: vertex-only depth optimization (old approach)."""
+    mask_bool = mask > 127 if mask.dtype == np.uint8 else mask > 0.5
+    verts_cv = pt3d_to_opencv(verts_pt3d)
+    uv, z_v = project(verts_cv, fx, fy, cx, cy)
+    u_int = np.round(uv[:, 0]).astype(np.int32)
+    v_int = np.round(uv[:, 1]).astype(np.int32)
+    in_bounds = (u_int >= 0) & (u_int < W) & (v_int >= 0) & (v_int < H) & (z_v > 0)
+    in_mask = np.zeros(len(verts_pt3d), dtype=bool)
+    in_mask[in_bounds] = mask_bool[v_int[in_bounds], u_int[in_bounds]]
+    valid = in_bounds & in_mask
+
+    if valid.sum() < 20:
+        return {"dt": [0, 0, 0], "ds": 0.0, "loss": 0.0, "success": False, "niter": 0}
+
+    z_mesh = z_v[valid].astype(np.float64)
+    z_moge = depth[v_int[valid], u_int[valid]].astype(np.float64)
+    z_centroid = float(centroid_pt3d[2])
+
+    a = z_mesh - z_centroid
+    b = z_moge - z_mesh
+    N = len(a)
+    reg_w = np.sqrt(0.01 * N)
+    A = np.column_stack([a, np.ones(N)])
+    A_reg = np.vstack([A, reg_w * np.eye(2)])
+    b_reg = np.concatenate([b, np.zeros(2)])
+    x, _, _, _ = np.linalg.lstsq(A_reg, b_reg, rcond=None)
+
+    return {"dt": [0.0, 0.0, float(x[1])], "ds": float(x[0]), "loss": 0.0, "success": True, "niter": 1}
 
 
 def apply_correction(verts_pt3d: np.ndarray, centroid: np.ndarray,
@@ -504,6 +658,7 @@ def main():
         # --- Optimize ---
         opt_result = optimize_object_pose(
             verts, mask, depth, fx, fy, cx, cy, H, W, centroid,
+            glb_path=glb_path,
             lambda_depth=args.lambda_depth,
             lambda_mask=args.lambda_mask,
             lambda_reg=args.lambda_reg,
