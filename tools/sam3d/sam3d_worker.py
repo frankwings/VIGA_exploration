@@ -74,9 +74,9 @@ class Transform3d:
     
     def translate(self, x, y, z):
         T = torch.eye(4, dtype=self.dtype, device=self.device)
-        T[0, 3] = x
-        T[1, 3] = y
-        T[2, 3] = z
+        T[3, 0] = x
+        T[3, 1] = y
+        T[3, 2] = z
         self._matrix = self._matrix @ T
         return self
     
@@ -101,23 +101,12 @@ if "CONDA_PREFIX" not in os.environ:
     conda_env = os.path.dirname(os.path.dirname(python_bin))
     os.environ["CONDA_PREFIX"] = conda_env
 
-# Coordinate system transformation matrices
-R_yup_to_zup: torch.Tensor = torch.tensor(
-    [[-1, 0, 0], [0, 0, 1], [0, 1, 0]], dtype=torch.float32
-)
-R_flip_z: torch.Tensor = torch.tensor(
-    [[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=torch.float32
-)
-R_pytorch3d_to_cam: torch.Tensor = torch.tensor(
-    [[-1, 0, 0], [0, -1, 0], [0, 0, 1]], dtype=torch.float32
-)
-# Flip Y axis to correct upside-down orientation
-R_flip_y: torch.Tensor = torch.tensor(
-    [[1, 0, 0], [0, -1, 0], [0, 0, 1]], dtype=torch.float32
-)
-# Flip X axis to correct left-right mirroring
-R_flip_x: torch.Tensor = torch.tensor(
-    [[-1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=torch.float32
+# Pre-transform: convert TRELLIS model space (Z-up) to Y-up before applying S@R+T.
+# This matches layout_post_optimization_utils.get_mesh() line 116:
+#   mesh_vertices = mesh_vertices @ np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]]).T
+# Which is [[1,0,0],[0,0,1],[0,-1,0]], mapping [x,y,z] -> [x, z, -y].
+R_zup_to_yup: torch.Tensor = torch.tensor(
+    [[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=torch.float32
 )
 
 
@@ -127,14 +116,15 @@ def transform_mesh_vertices(
     translation: torch.Tensor,
     scale: torch.Tensor
 ) -> torch.Tensor:
-    """Transform mesh vertices from model space to world coordinates.
+    """Transform mesh vertices from TRELLIS model space to PyTorch3D camera space.
 
-    Applies a series of coordinate transformations including:
-    - Z-flip for coordinate system conversion
-    - Y-up to Z-up conversion
-    - Scale, rotation, and translation from model output
-    - PyTorch3D to camera coordinate conversion
-    - Y and X axis flips to correct orientation
+    Pipeline:
+    1. Pre-transform: convert TRELLIS Z-up to Y-up (matches get_mesh in
+       layout_post_optimization_utils.py)
+    2. Apply scale, rotation, and translation predicted by the SAM3D pipeline.
+       These S, R, T map from Y-up model space to PyTorch3D camera space.
+
+    The result is in PyTorch3D camera convention (X-left, Y-up, Z-forward).
 
     Args:
         vertices: Mesh vertices as numpy array (N, 3).
@@ -149,8 +139,7 @@ def transform_mesh_vertices(
         vertices = torch.tensor(vertices, dtype=torch.float32)
 
     vertices = vertices.unsqueeze(0)  # Add batch dimension [1, N, 3]
-    vertices = vertices @ R_flip_z.to(vertices.device)
-    vertices = vertices @ R_yup_to_zup.to(vertices.device)
+    vertices = vertices @ R_zup_to_yup.to(vertices.device)
     R_mat = quaternion_to_matrix(rotation.to(vertices.device))
     tfm = Transform3d(dtype=vertices.dtype, device=vertices.device)
     tfm = (
@@ -159,11 +148,6 @@ def transform_mesh_vertices(
            .translate(translation[0], translation[1], translation[2])
     )
     vertices_world = tfm.transform_points(vertices)
-    vertices_world = vertices_world @ R_pytorch3d_to_cam.to(vertices_world.device)
-    # Flip Y axis to correct upside-down orientation
-    vertices_world = vertices_world @ R_flip_y.to(vertices_world.device)
-    # Flip X axis to correct left-right mirroring
-    vertices_world = vertices_world @ R_flip_x.to(vertices_world.device)
 
     return vertices_world[0]  # Remove batch dimension
 
