@@ -163,7 +163,7 @@ Key conventions:
 
 ## 5. Re-Run Results
 
-### TRELLIS Reconstruction (5 of 6 objects)
+### TRELLIS Reconstruction (6 of 6 objects)
 
 Re-ran TRELLIS for all 6 segmented objects from the greentea scene using the fixed `sam3d_worker.py`.
 
@@ -174,9 +174,9 @@ Re-ran TRELLIS for all 6 segmented objects from the greentea scene using the fix
 | alienware_keyboard | Completed | ~6 min | — |
 | envelope | Completed | ~5 min | — |
 | green_tea_bottle (desk surface) | Completed | ~7 min | — |
-| headphones | **Failed** (decode hung >15 min) | killed | 24,032 |
+| headphones | **Completed** (2nd attempt) | ~24 min | 24,032 |
 
-The headphones object had the most complex geometry (24K sparse coords) and hung during the decode stage. All other objects completed successfully.
+The headphones object had the most complex geometry (24K sparse coords). First attempt hung during decode (batch run, VRAM contention). Second attempt ran solo and completed successfully: sparse structure ~12s, SLAT ~4m15s, decode ~19m19s.
 
 ### MoGe Camera Intrinsics (Full Target Image)
 
@@ -197,6 +197,7 @@ All transforms stored in `output/sam3d_rerun_fixed/object_transforms.json`:
 | envelope | (0.456, 0.712, 2.299) | 0.499 | Mail envelope |
 | green_tea_bottle | (0.053, -0.449, 1.441) | 2.003 | Desk surface segment |
 | green_tea_bottle_1 | (0.022, -0.007, 1.193) | 1.001 | Ito En bottle |
+| headphones | (-0.733, 0.960, 2.397) | 0.349 | Headphone ear cups |
 
 Note: Translations are in PyTorch3D camera space (X-left, Y-up, Z-forward). The render scripts apply axis flips to convert to standard image coordinates.
 
@@ -244,16 +245,24 @@ Note: Translations are in PyTorch3D camera space (X-left, Y-up, Z-forward). The 
 - Position: Bottom area, matches 2D input
 - Note: This is the desk, not the bottle — SAM named it after the dominant texture
 
+### headphones
+
+![headphones_compare](../output/sam3d_rerun_fixed/headphones_compare.png)
+
+- Shape: Recognizable ear cup pair — teal/green color matches input
+- Position: Upper-right area, matches 2D input
+- Note: Reconstructed on 2nd attempt (solo run). Decode took ~19 min due to 24K sparse coords (highest complexity object).
+
 ---
 
 ## 7. Full Scene Comparison
 
-![full_scene_comparison](../output/sam3d_rerun_fixed/full_scene_comparison.png)
+![full_scene_comparison](../output/sam3d_rerun_fixed/full_scene_comparison_6obj.png)
 
 **Left:** Original target photograph
-**Right:** 3D render of all 5 reconstructed objects placed using MoGe camera + SAM3D transforms
+**Right:** 3D render of all 6 reconstructed objects placed using MoGe camera + SAM3D transforms
 
-The overall spatial layout matches: bottle in the foreground center, keyboard behind it, envelope in the upper area, desk surface as the background plane. The headphones (upper-right in the 2D image) are missing due to the TRELLIS decode failure.
+The overall spatial layout matches: bottle in the foreground center, keyboard behind it, envelope in the upper area, desk surface as the background plane, and headphones in the upper-right. All 6 segmented objects are now successfully reconstructed and positioned in 3D space.
 
 ---
 
@@ -280,13 +289,13 @@ The overall spatial layout matches: bottle in the foreground center, keyboard be
 
 ```
 output/sam3d_rerun_fixed/
-├── object_transforms.json          # Combined transforms for all 5 objects
+├── object_transforms.json          # Combined transforms for all 6 objects
 ├── target_moge.npz                 # MoGe intrinsics from full target image
-├── *.glb                           # 5 reconstructed GLB files
+├── *.glb                           # 6 reconstructed GLB files
 ├── *_render.png                    # Individual object renders
 ├── *_compare.png                   # Per-object 2D vs 3D comparisons
-├── full_scene_render.png           # All objects in one scene
-├── full_scene_comparison.png       # Full scene vs target image
+├── full_scene_render_6obj.png      # All 6 objects in one scene
+├── full_scene_comparison_6obj.png  # Full scene vs target image
 └── *_sam3d.log                     # TRELLIS inference logs
 ```
 
@@ -334,7 +343,7 @@ To quantify remaining alignment errors, we measured the bounding-box center offs
 
 ## 11. Known Issues & Next Steps
 
-1. **Headphones failed** — TRELLIS decode hung for >15 min on this object (24K sparse coords, highest complexity). Could retry with a timeout or reduced SLAT steps.
+1. ~~**Headphones failed**~~ — **Resolved.** Successfully reconstructed on 2nd attempt (solo run, ~24 min total). Decode took ~19 min for 24K sparse coords.
 2. **Mesh is mirrored in 3D** — The horizontal flip is currently applied at render time. For correct GLB files, the X-axis negation should be applied in `sam3d_worker.py` (with face winding correction) so GLBs are correct in any viewer.
 3. **Texture quality** — TRELLIS reconstructions are recognizable but textures are softer/less detailed than 2D inputs. This is inherent to the feed-forward reconstruction approach.
 4. **Object naming** — SAM's VLM naming assigned "green_tea_bottle" to the desk surface because the bottle texture was prominent. Better filtering or manual override would improve this.
