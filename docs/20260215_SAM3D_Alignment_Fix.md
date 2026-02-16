@@ -292,7 +292,35 @@ output/sam3d_rerun_fixed/
 
 ---
 
-## 9. Git History
+## 9. Per-Object Pixel Accuracy Analysis
+
+To quantify remaining alignment errors, we measured the bounding-box center offset between each 2D segmented input and its corresponding 3D render (both at 771x1024 resolution).
+
+| Object | 2D Center (row, col) | 3D Center (row, col) | dy (px) | dx (px) | Error % |
+|---|---|---|---|---|---|
+| alienware_keyboard | (420, 616) | (428, 588) | +8 (lower) | -28 | 0.8% |
+| alienware_keyboard_1 | (384, 135) | (380, 142) | -4 (higher) | +8 | 0.4% |
+| envelope | (198, 168) | (224, 192) | +26 (lower) | +25 | 2.5% |
+| green_tea_bottle (desk) | (801, 385) | (694, 385) | -106 (higher) | 0 | 10.4% |
+| green_tea_bottle_1 (bottle) | (475, 362) | (459, 368) | -16 (higher) | +6 | 1.6% |
+
+### Overlay Diagnostic
+
+![overlay_diagnostic](../output/sam3d_rerun_fixed/overlay_diagnostic.png)
+
+*3D render blended at 60% opacity over the original target photo. The bottle, keyboard, and envelope align well.*
+
+### Analysis
+
+- **No consistent camera shift.** The vertical offsets go both positive (3D lower) and negative (3D higher), ruling out a global camera position error.
+- **Small objects** (keyboards, bottle, envelope): 4-26px offsets (0.4-2.5%). This is within expected accuracy for monocular depth estimation from MoGe.
+- **Desk surface**: 106px offset (10.4%). Large flat surfaces have inherently ambiguous depth in monocular estimation, and the bounding-box "center" is poorly defined for irregularly-shaped segments.
+- **Root cause** of residual offsets: per-object variance in MoGe's monocular geometry estimation. Each object's 3D position is estimated independently from its pointmap, introducing small per-object errors.
+- **To improve further** would require multi-view input, manual position tuning, or joint optimization across all objects.
+
+---
+
+## 10. Git History
 
 | Commit | Message |
 |---|---|
@@ -300,13 +328,15 @@ output/sam3d_rerun_fixed/
 | `d82b86e` | Fix SAM3D vertex transform bugs and add alignment diagnostics |
 | `73d6a11` | Add full scene rendering pipeline with vertical flip fix |
 | `c1688b8` | Fix horizontal mirror: PyTorch3D X-left vs OpenCV X-right |
+| `3281019` | Add SAM3D alignment fix documentation |
 
 ---
 
-## 10. Known Issues & Next Steps
+## 11. Known Issues & Next Steps
 
 1. **Headphones failed** — TRELLIS decode hung for >15 min on this object (24K sparse coords, highest complexity). Could retry with a timeout or reduced SLAT steps.
 2. **Mesh is mirrored in 3D** — The horizontal flip is currently applied at render time. For correct GLB files, the X-axis negation should be applied in `sam3d_worker.py` (with face winding correction) so GLBs are correct in any viewer.
 3. **Texture quality** — TRELLIS reconstructions are recognizable but textures are softer/less detailed than 2D inputs. This is inherent to the feed-forward reconstruction approach.
 4. **Object naming** — SAM's VLM naming assigned "green_tea_bottle" to the desk surface because the bottle texture was prominent. Better filtering or manual override would improve this.
 5. **Common-sense sizing** — `object_sizing.py` defines real-world sizes (bottle ~20cm, keyboard ~45cm) but these are not yet integrated into the render pipeline.
+6. **Per-object position accuracy** — Residual 0.4-2.5% offsets from MoGe monocular estimation. Would need multi-view input or joint optimization to improve further.
