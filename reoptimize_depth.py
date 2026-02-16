@@ -1,18 +1,17 @@
 #!/usr/bin/env python
-"""Re-optimize SAM3D object poses with mask-filtered depth loss.
+"""Re-optimize SAM3D object poses using ICP with grown masks.
 
-Loads existing GLBs (vertices in PyTorch3D camera space), re-optimizes
-a translation + scale correction per object using:
-  - Silhouette loss: projected vertices vs GT mask
-  - Depth loss: projected vertex Z vs MoGe depth (within mask only)
-
-Outputs new GLBs, transforms JSON, per-object comparison PNGs, and
-diagnostic scatter/dashboard figures to a new results folder.
+For each object:
+  1. Grow the segmentation mask toward its convex hull, stopping at
+     depth edges (adaptive threshold based on local Sobel statistics).
+  2. Extract 3D points from the MoGe pointmap within the grown mask.
+  3. Run Open3D ICP to align mesh vertices to pointmap points.
+  4. Save corrected GLBs + before/after visualizations.
 
 Usage:
     python reoptimize_depth.py [--data-dir output/sam3d_dining] [--output-dir output/sam3d_dining_v2]
 
-Requires: numpy, trimesh, scipy, matplotlib, Pillow  (the `agent` conda env)
+Run with:  C:/Users/kingy/miniconda3/envs/sam3d_py311/python.exe reoptimize_depth.py
 """
 
 from __future__ import annotations
@@ -31,10 +30,15 @@ except ImportError:
     sys.exit("trimesh not installed.  pip install trimesh")
 
 try:
-    from scipy.optimize import minimize
-    from scipy.ndimage import binary_dilation
+    from scipy.ndimage import binary_dilation, binary_erosion, binary_fill_holes
+    from scipy.spatial import ConvexHull
 except ImportError:
     sys.exit("scipy not installed.  pip install scipy")
+
+try:
+    import open3d as o3d
+except ImportError:
+    sys.exit("open3d not installed.  pip install open3d")
 
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -55,11 +59,12 @@ def load_moge(npz_path: Path) -> dict:
     data = np.load(npz_path)
     K = data["intrinsics_px"].astype(np.float64)
     depth = data["depth"].astype(np.float32)
+    points = data["points"].astype(np.float32)
     w, h = int(data["image_width"]), int(data["image_height"])
     return {
         "K": K, "fx": K[0, 0], "fy": K[1, 1], "cx": K[0, 2], "cy": K[1, 2],
         "depth": depth, "width": w, "height": h,
-        "points": data["points"].astype(np.float32),
+        "points": points,
     }
 
 
@@ -91,7 +96,7 @@ def project(verts_cv, fx, fy, cx, cy):
 
 
 # ---------------------------------------------------------------------------
-# Mask-filtered depth error (fixes issue #1)
+# Mask-filtered depth error
 # ---------------------------------------------------------------------------
 
 def compute_masked_depth_error(verts_pt3d, mask, depth, fx, fy, cx, cy, H, W):
@@ -102,7 +107,6 @@ def compute_masked_depth_error(verts_pt3d, mask, depth, fx, fy, cx, cy, H, W):
     u_int = np.round(uv[:, 0]).astype(np.int32)
     v_int = np.round(uv[:, 1]).astype(np.int32)
 
-    # Filter: in bounds AND within mask
     in_bounds = (u_int >= 0) & (u_int < W) & (v_int >= 0) & (v_int < H) & (z_v > 0)
     in_mask = np.zeros(len(verts_pt3d), dtype=bool)
     in_mask[in_bounds] = mask[v_int[in_bounds], u_int[in_bounds]]
@@ -131,265 +135,277 @@ def compute_masked_depth_error(verts_pt3d, mask, depth, fx, fy, cx, cy, H, W):
 
 
 # ---------------------------------------------------------------------------
-# Ray-cast mesh to get per-pixel depth
+# Convex-hull mask growth with depth-edge stopping
 # ---------------------------------------------------------------------------
 
-def raycast_mesh_depth(
-    glb_path: Path,
-    mask: np.ndarray,
-    fx: float, fy: float, cx: float, cy: float,
-    H: int, W: int,
-    max_rays: int = 10000,
-    max_faces: int = 8000,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Cast rays from camera through mask pixels, intersect with mesh.
+def compute_depth_sobel(depth: np.ndarray) -> np.ndarray:
+    """Compute Sobel gradient magnitude of depth map."""
+    from scipy.ndimage import sobel
+    sx = sobel(depth.astype(np.float64), axis=1)
+    sy = sobel(depth.astype(np.float64), axis=0)
+    return np.sqrt(sx**2 + sy**2).astype(np.float32)
 
-    The mesh is in PyTorch3D camera space.  We convert to OpenCV for
-    ray generation, then cast rays through the mesh in OpenCV space.
 
-    High-poly meshes are simplified to max_faces triangles before
-    ray-casting to avoid OOM in trimesh's ray-triangle intersection.
+def make_convex_hull_mask(mask_bool: np.ndarray) -> np.ndarray:
+    """Create a filled convex hull mask from a binary mask."""
+    rows, cols = np.where(mask_bool)
+    if len(rows) < 3:
+        return mask_bool.copy()
+
+    points_2d = np.column_stack([cols, rows])  # (N, 2) as (x, y)
+    try:
+        hull = ConvexHull(points_2d)
+    except Exception:
+        return mask_bool.copy()
+
+    # Rasterize convex hull using matplotlib path
+    from matplotlib.path import Path as MplPath
+    hull_pts = points_2d[hull.vertices]
+    hull_path = MplPath(hull_pts)
+
+    H, W = mask_bool.shape
+    # Test all pixels inside the bounding box of the hull
+    rmin, rmax = rows.min(), rows.max()
+    cmin, cmax = cols.min(), cols.max()
+    # Add small margin
+    rmin, rmax = max(0, rmin - 2), min(H - 1, rmax + 2)
+    cmin, cmax = max(0, cmin - 2), min(W - 1, cmax + 2)
+
+    yy, xx = np.mgrid[rmin:rmax+1, cmin:cmax+1]
+    test_pts = np.column_stack([xx.ravel(), yy.ravel()])
+    inside = hull_path.contains_points(test_pts).reshape(yy.shape)
+
+    hull_mask = np.zeros_like(mask_bool)
+    hull_mask[rmin:rmax+1, cmin:cmax+1] = inside
+    return hull_mask
+
+
+def grow_mask_to_convex_hull(
+    mask_bool: np.ndarray,
+    depth: np.ndarray,
+    sobel_mag: np.ndarray,
+    edge_sigma: float = 2.0,
+    max_iters: int = 50,
+) -> np.ndarray:
+    """Grow mask toward convex hull, stopping at depth edges.
+
+    The depth-edge threshold is adaptive: computed as
+        threshold = median(sobel within mask) + edge_sigma * std(sobel within mask)
+    so it's based on the local Sobel statistics of the existing mask region.
+
+    Args:
+        mask_bool: Original binary mask (H, W)
+        depth: MoGe depth map (H, W)
+        sobel_mag: Sobel gradient magnitude of depth (H, W)
+        edge_sigma: Number of std deviations above median to set the threshold
+        max_iters: Maximum dilation iterations
 
     Returns:
-        pixel_rows:  (N,) row indices of mask pixels that hit the mesh
-        pixel_cols:  (N,) col indices
-        hit_depths:  (N,) depth (Z) at each hit in OpenCV space
+        grown_mask: Expanded binary mask (H, W)
     """
-    mask_bool = mask > 127 if mask.dtype == np.uint8 else mask > 0.5
+    hull_mask = make_convex_hull_mask(mask_bool)
 
-    # Get mask pixel coordinates
-    rows, cols = np.where(mask_bool)
-    n_mask = len(rows)
-    if n_mask == 0:
-        return np.array([]), np.array([]), np.array([])
+    # Compute adaptive threshold from Sobel values within the original mask
+    sobel_in_mask = sobel_mag[mask_bool]
+    if len(sobel_in_mask) == 0:
+        return mask_bool.copy()
+    sobel_median = float(np.median(sobel_in_mask))
+    sobel_std = float(np.std(sobel_in_mask))
+    threshold = sobel_median + edge_sigma * sobel_std
 
-    # Subsample if too many pixels
-    if n_mask > max_rays:
-        idx = np.random.default_rng(42).choice(n_mask, max_rays, replace=False)
-        rows, cols = rows[idx], cols[idx]
+    # Region we're allowed to grow into: inside hull but not original mask
+    growth_region = hull_mask & ~mask_bool
 
-    # Build rays in OpenCV camera space: origin at (0,0,0), direction through each pixel
-    dx = (cols.astype(np.float64) - cx) / fx
-    dy = (rows.astype(np.float64) - cy) / fy
-    dz = np.ones_like(dx)
-    directions = np.stack([dx, dy, dz], axis=-1)
-    norms = np.linalg.norm(directions, axis=-1, keepdims=True)
-    directions /= norms
+    # Pixels in the growth region that are NOT depth edges
+    safe_pixels = growth_region & (sobel_mag < threshold)
 
-    origins = np.zeros_like(directions)
+    # Iterative dilation: expand mask one pixel at a time, but only into safe pixels
+    struct = np.ones((3, 3), dtype=bool)
+    grown = mask_bool.copy()
 
-    # Load mesh and convert to OpenCV space for ray intersection
-    scene = trimesh.load(str(glb_path), force="scene")
-    all_verts = []
-    all_faces = []
-    face_offset = 0
-    for geom in scene.geometry.values():
-        if hasattr(geom, "vertices") and hasattr(geom, "faces"):
-            v = np.asarray(geom.vertices, dtype=np.float64)
-            f = np.asarray(geom.faces, dtype=np.int64) + face_offset
-            all_verts.append(v)
-            all_faces.append(f)
-            face_offset += len(v)
+    for i in range(max_iters):
+        dilated = binary_dilation(grown, structure=struct)
+        # Only add pixels that are safe (inside hull, below edge threshold)
+        new_pixels = dilated & safe_pixels & ~grown
+        if not new_pixels.any():
+            break
+        grown = grown | new_pixels
 
-    if not all_verts:
-        return np.array([]), np.array([]), np.array([])
-
-    verts = np.concatenate(all_verts, axis=0)
-    faces = np.concatenate(all_faces, axis=0)
-
-    # PT3D -> OpenCV
-    verts_cv = verts.copy()
-    verts_cv[:, 0] = -verts[:, 0]
-    verts_cv[:, 1] = -verts[:, 1]
-
-    mesh_cv = trimesh.Trimesh(vertices=verts_cv, faces=faces, process=False)
-
-    # Simplify high-poly meshes to avoid OOM in ray-triangle intersection
-    # trimesh's ray_triangle allocates (n_faces * n_rays, 3) which can be huge
-    n_faces = len(mesh_cv.faces)
-    if n_faces > max_faces:
-        print(f"    Simplifying mesh: {n_faces} -> {max_faces} faces")
-        try:
-            import fast_simplification
-            pts_s, tri_s = fast_simplification.simplify(
-                np.asarray(mesh_cv.vertices, dtype=np.float64),
-                np.asarray(mesh_cv.faces, dtype=np.int32),
-                target_count=max_faces,
-            )
-            mesh_cv = trimesh.Trimesh(vertices=pts_s, faces=tri_s, process=False)
-            print(f"    After simplification: {len(mesh_cv.faces)} faces")
-        except Exception as e:
-            # Fallback: reduce rays so n_faces * n_rays < 100M
-            print(f"    Simplification failed ({e}), reducing rays instead")
-            safe_rays = min(len(rows), max(500, 100_000_000 // n_faces))
-            if safe_rays < len(rows):
-                idx = np.random.default_rng(42).choice(len(rows), safe_rays, replace=False)
-                rows, cols = rows[idx], cols[idx]
-                dx = (cols.astype(np.float64) - cx) / fx
-                dy = (rows.astype(np.float64) - cy) / fy
-                dz = np.ones_like(dx)
-                directions = np.stack([dx, dy, dz], axis=-1)
-                norms = np.linalg.norm(directions, axis=-1, keepdims=True)
-                directions /= norms
-                origins = np.zeros_like(directions)
-                print(f"    Reduced rays to {safe_rays}")
-
-    # Ray-cast
-    locations, index_ray, index_tri = mesh_cv.ray.intersects_location(
-        ray_origins=origins, ray_directions=directions, multiple_hits=False
-    )
-
-    if len(locations) == 0:
-        return np.array([]), np.array([]), np.array([])
-
-    hit_depths = locations[:, 2]  # Z in OpenCV = depth
-    hit_rows = rows[index_ray]
-    hit_cols = cols[index_ray]
-
-    return hit_rows, hit_cols, hit_depths
+    return grown
 
 
 # ---------------------------------------------------------------------------
-# Re-optimization using per-pixel depth (closed-form least squares)
+# Mask growth visualization
 # ---------------------------------------------------------------------------
 
-def optimize_object_pose(
-    verts_pt3d: np.ndarray,
-    mask: np.ndarray,
+def visualize_mask_growth(
+    mask_bool: np.ndarray,
+    grown_mask: np.ndarray,
+    hull_mask: np.ndarray,
     depth: np.ndarray,
-    fx: float, fy: float, cx: float, cy: float,
-    H: int, W: int,
-    centroid_pt3d: np.ndarray,
-    glb_path: Path = None,
-    lambda_depth: float = 1.0,
-    lambda_mask: float = 0.5,
-    lambda_reg: float = 0.01,
-    max_ds: float = 0.25,
-    skip_threshold: float = 0.03,
-) -> dict:
-    """Optimize translation + scale correction using ALL mask pixel depths.
+    sobel_mag: np.ndarray,
+    threshold: float,
+    obj_name: str,
+    output_path: Path,
+):
+    """4-panel visualization: depth + sobel | original mask | grown mask | overlay."""
+    H, W = mask_bool.shape
+    fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+    fig.suptitle(f"Mask Growth: {obj_name}", fontsize=14, fontweight="bold")
 
-    1. Ray-cast mesh to get per-pixel depth at mask pixels
-    2. Solve closed-form least squares for (dt_z, ds):
-         z_corrected = (z_mesh - z_centroid) * (1 + ds) + z_centroid + dt_z
-       which is linear in (dt_z, ds).
+    # Panel 1: Depth map with Sobel edges highlighted
+    ax = axes[0, 0]
+    ax.imshow(depth, cmap="turbo", vmin=depth.min(), vmax=depth.max())
+    edge_overlay = np.zeros((H, W, 4))
+    edge_overlay[sobel_mag >= threshold] = [1, 0, 0, 0.5]  # red for edges
+    ax.imshow(edge_overlay)
+    ax.set_title(f"Depth + Edges (threshold={threshold:.4f})")
+    ax.axis("off")
 
-    ds is clamped to [-max_ds, +max_ds] to prevent extreme scale changes.
-    Objects with rel_err < skip_threshold are skipped (already well-aligned).
-    """
-    if glb_path is None:
-        return _optimize_vertex_only(
-            verts_pt3d, mask, depth, fx, fy, cx, cy, H, W, centroid_pt3d
-        )
+    # Panel 2: Original mask vs convex hull
+    ax = axes[0, 1]
+    vis = np.zeros((H, W, 3), dtype=np.uint8)
+    vis[hull_mask] = [60, 60, 100]       # dark blue = hull
+    vis[mask_bool] = [0, 200, 0]         # green = original mask
+    hull_edge = hull_mask & ~binary_erosion(hull_mask, iterations=1)
+    vis[hull_edge] = [255, 255, 0]       # yellow = hull boundary
+    ax.imshow(vis)
+    n_orig = mask_bool.sum()
+    n_hull = hull_mask.sum()
+    ax.set_title(f"Original mask ({n_orig:,}px) + Convex hull ({n_hull:,}px)")
+    ax.axis("off")
 
-    # Check if already well-aligned: skip optimization for good objects
-    quick_stats = compute_masked_depth_error(
-        verts_pt3d, mask > 127 if mask.dtype == np.uint8 else mask > 0.5,
-        depth, fx, fy, cx, cy, H, W
-    )
-    rel_err = quick_stats.get("depth_error_rel_mean", 1.0)
-    if rel_err < skip_threshold:
-        print(f"    Skipping optimization (rel_err={rel_err:.2%} < {skip_threshold:.0%} threshold)")
-        return {"dt": [0.0, 0.0, 0.0], "ds": 0.0, "loss": 0.0, "success": True, "niter": 0, "n_rays": 0}
+    # Panel 3: Grown mask
+    ax = axes[1, 0]
+    vis2 = np.zeros((H, W, 3), dtype=np.uint8)
+    vis2[grown_mask] = [0, 150, 200]     # cyan = grown
+    vis2[mask_bool] = [0, 200, 0]        # green = original
+    added = grown_mask & ~mask_bool
+    vis2[added] = [255, 165, 0]          # orange = newly added
+    ax.imshow(vis2)
+    n_grown = grown_mask.sum()
+    n_added = added.sum()
+    ax.set_title(f"Grown mask ({n_grown:,}px, +{n_added:,} added)")
+    ax.axis("off")
 
-    # Step 1: Ray-cast to get mesh depth at mask pixels
-    hit_rows, hit_cols, z_mesh = raycast_mesh_depth(
-        glb_path, mask, fx, fy, cx, cy, H, W, max_rays=15000
-    )
+    # Panel 4: Sobel histogram with threshold
+    ax = axes[1, 1]
+    sobel_in_mask = sobel_mag[mask_bool]
+    sobel_in_growth = sobel_mag[hull_mask & ~mask_bool]
+    if len(sobel_in_mask) > 0:
+        ax.hist(sobel_in_mask.ravel(), bins=100, alpha=0.7, color="green",
+                label="Inside mask", density=True)
+    if len(sobel_in_growth) > 0:
+        ax.hist(sobel_in_growth.ravel(), bins=100, alpha=0.5, color="orange",
+                label="Growth region", density=True)
+    ax.axvline(threshold, color="red", ls="--", lw=2, label=f"Threshold={threshold:.4f}")
+    ax.set_xlabel("Sobel gradient magnitude")
+    ax.set_ylabel("Density")
+    ax.set_title("Depth gradient distribution")
+    ax.legend(fontsize=8)
+    ax.set_xlim(0, min(threshold * 5, sobel_mag.max()))
 
-    if len(z_mesh) < 20:
-        print(f"    WARNING: Only {len(z_mesh)} ray hits, falling back to vertex-only")
-        return _optimize_vertex_only(
-            verts_pt3d, mask, depth, fx, fy, cx, cy, H, W, centroid_pt3d
-        )
-
-    # Step 2: Get MoGe depth at the same pixels
-    z_moge = depth[hit_rows, hit_cols].astype(np.float64)
-    z_mesh = z_mesh.astype(np.float64)
-
-    z_centroid = float(centroid_pt3d[2])  # Z in PT3D = Z in OpenCV
-
-    print(f"    Ray-cast: {len(z_mesh)} hits, "
-          f"mesh_z=[{z_mesh.min():.3f},{z_mesh.max():.3f}], "
-          f"moge_z=[{z_moge.min():.3f},{z_moge.max():.3f}]")
-
-    # Step 3: Closed-form least squares
-    # z_corrected = z_mesh + (z_mesh - z_centroid) * ds + dt_z
-    # Minimize: ||z_corrected - z_moge||^2 + lambda_reg * (ds^2 + dt_z^2)
-    a = z_mesh - z_centroid  # (N,)
-    b = z_moge - z_mesh       # (N,)
-    N = len(a)
-
-    # Build regularized least squares: [A; sqrt(reg)*I] @ x = [b; 0]
-    reg_w = np.sqrt(lambda_reg * N)
-    A = np.column_stack([a, np.ones(N)])  # (N, 2)
-    A_reg = np.vstack([A, reg_w * np.eye(2)])
-    b_reg = np.concatenate([b, np.zeros(2)])
-
-    x, residuals, rank, sv = np.linalg.lstsq(A_reg, b_reg, rcond=None)
-    ds = float(np.clip(x[0], -max_ds, max_ds))
-    dt_z = float(x[1])
-
-    # If ds was clamped, re-solve for dt_z alone with ds fixed
-    if abs(x[0]) > max_ds:
-        print(f"    Clamped ds from {x[0]:+.4f} to {ds:+.4f}, re-solving dt_z")
-        residual_after_ds = b - a * ds  # what dt_z needs to fix
-        dt_z = float(np.median(residual_after_ds))  # robust median
-
-    # Compute loss for reporting
-    z_corrected = z_mesh + a * ds + dt_z
-    err = z_corrected - z_moge
-    loss = float(np.mean(err**2))
-
-    return {
-        "dt": [0.0, 0.0, dt_z],
-        "ds": ds,
-        "loss": loss,
-        "success": True,
-        "niter": 1,
-        "n_rays": len(z_mesh),
-    }
-
-
-def _optimize_vertex_only(verts_pt3d, mask, depth, fx, fy, cx, cy, H, W, centroid_pt3d):
-    """Fallback: vertex-only depth optimization (old approach)."""
-    mask_bool = mask > 127 if mask.dtype == np.uint8 else mask > 0.5
-    verts_cv = pt3d_to_opencv(verts_pt3d)
-    uv, z_v = project(verts_cv, fx, fy, cx, cy)
-    u_int = np.round(uv[:, 0]).astype(np.int32)
-    v_int = np.round(uv[:, 1]).astype(np.int32)
-    in_bounds = (u_int >= 0) & (u_int < W) & (v_int >= 0) & (v_int < H) & (z_v > 0)
-    in_mask = np.zeros(len(verts_pt3d), dtype=bool)
-    in_mask[in_bounds] = mask_bool[v_int[in_bounds], u_int[in_bounds]]
-    valid = in_bounds & in_mask
-
-    if valid.sum() < 20:
-        return {"dt": [0, 0, 0], "ds": 0.0, "loss": 0.0, "success": False, "niter": 0}
-
-    z_mesh = z_v[valid].astype(np.float64)
-    z_moge = depth[v_int[valid], u_int[valid]].astype(np.float64)
-    z_centroid = float(centroid_pt3d[2])
-
-    a = z_mesh - z_centroid
-    b = z_moge - z_mesh
-    N = len(a)
-    reg_w = np.sqrt(0.01 * N)
-    A = np.column_stack([a, np.ones(N)])
-    A_reg = np.vstack([A, reg_w * np.eye(2)])
-    b_reg = np.concatenate([b, np.zeros(2)])
-    x, _, _, _ = np.linalg.lstsq(A_reg, b_reg, rcond=None)
-
-    return {"dt": [0.0, 0.0, float(x[1])], "ds": float(x[0]), "loss": 0.0, "success": True, "niter": 1}
-
-
-def apply_correction(verts_pt3d: np.ndarray, centroid: np.ndarray,
-                     dt: np.ndarray, ds: float) -> np.ndarray:
-    """Apply translation + scale correction to vertices."""
-    return (verts_pt3d - centroid) * (1.0 + ds) + centroid + dt
+    plt.tight_layout()
+    fig.savefig(str(output_path), dpi=120, bbox_inches="tight")
+    plt.close()
 
 
 # ---------------------------------------------------------------------------
-# Visualization (issue #3)
+# ICP optimization using Open3D
+# ---------------------------------------------------------------------------
+
+def run_icp_alignment(
+    verts_pt3d: np.ndarray,
+    pointmap: np.ndarray,
+    grown_mask: np.ndarray,
+    icp_threshold: float = 0.3,
+    depth_quantile: float = 0.9,
+    max_source_points: int = 20000,
+) -> tuple[np.ndarray, dict]:
+    """Run ICP to align mesh vertices to MoGe pointmap within the grown mask.
+
+    The mesh vertices are in PyTorch3D camera space (X-left, Y-up, Z-forward).
+    The MoGe pointmap is in OpenCV camera space (X-right, Y-down, Z-forward).
+    ICP runs in OpenCV space; the result is converted back to PT3D space.
+
+    Args:
+        verts_pt3d: (N, 3) mesh vertices in PT3D space
+        pointmap: (H, W, 3) MoGe pointmap in OpenCV camera space
+        grown_mask: (H, W) binary mask (grown)
+        icp_threshold: Max correspondence distance for ICP
+        depth_quantile: Filter outlier target points by depth percentile
+        max_source_points: Subsample source points for speed
+
+    Returns:
+        verts_aligned: (N, 3) aligned vertices in PT3D space
+        info: dict with ICP stats
+    """
+    # Extract target points from pointmap within grown mask (OpenCV space)
+    target_pts = pointmap[grown_mask]  # (M, 3)
+
+    # Filter depth outliers
+    if len(target_pts) > 0 and depth_quantile < 1.0:
+        z_vals = target_pts[:, 2]  # Z = depth (forward) in OpenCV
+        z_thresh = np.quantile(z_vals, depth_quantile)
+        target_pts = target_pts[z_vals <= z_thresh]
+
+    if len(target_pts) < 10:
+        return verts_pt3d.copy(), {"fitness": 0, "rmse": 0, "n_target": 0, "n_source": 0}
+
+    # Convert source vertices from PT3D to OpenCV space for ICP
+    # OpenCV: X_cv = -X_pt3d, Y_cv = -Y_pt3d, Z_cv = Z_pt3d
+    source_pts_cv = pt3d_to_opencv(verts_pt3d)
+
+    # Subsample source points if too many
+    if len(source_pts_cv) > max_source_points:
+        idx = np.random.default_rng(42).choice(len(source_pts_cv), max_source_points, replace=False)
+        source_pts_sub = source_pts_cv[idx]
+    else:
+        source_pts_sub = source_pts_cv
+
+    # Create Open3D point clouds
+    src_pcd = o3d.geometry.PointCloud()
+    src_pcd.points = o3d.utility.Vector3dVector(source_pts_sub.astype(np.float64))
+
+    tgt_pcd = o3d.geometry.PointCloud()
+    tgt_pcd.points = o3d.utility.Vector3dVector(target_pts.astype(np.float64))
+
+    # Run ICP in OpenCV space
+    reg = o3d.pipelines.registration.registration_icp(
+        src_pcd, tgt_pcd,
+        max_correspondence_distance=icp_threshold,
+        init=np.eye(4),
+        estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+        criteria=o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=100),
+    )
+
+    T_cv = reg.transformation  # 4x4 in OpenCV space
+    fitness = reg.fitness
+    rmse = reg.inlier_rmse
+
+    # Convert transformation from OpenCV space back to PT3D space:
+    # T_pt3d = M @ T_cv @ M  where M = diag(-1, -1, 1, 1)
+    M = np.diag([-1.0, -1.0, 1.0, 1.0])
+    T_pt3d = M @ T_cv @ M
+
+    # Apply transformation to ALL vertices in PT3D space
+    ones = np.ones((len(verts_pt3d), 1), dtype=np.float64)
+    verts_h = np.hstack([verts_pt3d.astype(np.float64), ones])  # (N, 4)
+    verts_aligned = (verts_h @ T_pt3d.T)[:, :3].astype(np.float32)
+
+    info = {
+        "fitness": float(fitness),
+        "rmse": float(rmse),
+        "n_target": len(target_pts),
+        "n_source": len(source_pts_sub),
+        "transformation": T_pt3d.tolist(),
+        "transformation_cv": T_cv.tolist(),
+    }
+    return verts_aligned, info
+
+
+# ---------------------------------------------------------------------------
+# Visualization helpers
 # ---------------------------------------------------------------------------
 
 def render_projected_vertices(verts_pt3d, fx, fy, cx, cy, H, W, depth_map):
@@ -402,7 +418,7 @@ def render_projected_vertices(verts_pt3d, fx, fy, cx, cy, H, W, depth_map):
     valid = (u_int >= 0) & (u_int < W) & (v_int >= 0) & (v_int < H) & (z_v > 0)
 
     vmin, vmax = depth_map.min(), depth_map.max()
-    render = np.ones((H, W, 3), dtype=np.uint8) * 240  # light gray bg
+    render = np.ones((H, W, 3), dtype=np.uint8) * 240
 
     if valid.sum() > 0:
         u_v = u_int[valid]
@@ -414,9 +430,7 @@ def render_projected_vertices(verts_pt3d, fx, fy, cx, cy, H, W, depth_map):
         g = np.clip(z_norm * 200 + 55, 0, 255).astype(np.uint8)
         b = np.clip(z_norm * 255, 0, 255).astype(np.uint8)
 
-        # Vectorized z-buffer: sort by depth (far to near), then scatter
-        # Later (nearer) writes overwrite earlier (farther) ones
-        order = np.argsort(-z_valid)  # far to near
+        order = np.argsort(-z_valid)
         flat_idx = v_v[order] * W + u_v[order]
         render_flat = render.reshape(-1, 3)
         colors = np.stack([r[order], g[order], b[order]], axis=-1)
@@ -427,26 +441,14 @@ def render_projected_vertices(verts_pt3d, fx, fy, cx, cy, H, W, depth_map):
 
 
 def make_comparison_image(
-    input_png_path: Path | None,
-    mask: np.ndarray,
-    verts_before: np.ndarray,
-    verts_after: np.ndarray,
-    depth: np.ndarray,
-    fx: float, fy: float, cx: float, cy: float,
-    H: int, W: int,
-    obj_name: str,
-    stats_before: dict,
-    stats_after: dict,
-    output_path: Path,
+    input_png_path, mask, verts_before, verts_after, depth,
+    fx, fy, cx, cy, H, W, obj_name, stats_before, stats_after, output_path,
 ):
     """Create a 3-panel comparison: input mask | before render | after render."""
-    # Panel 1: Mask overlay
     if input_png_path and input_png_path.exists() and Image:
         img = Image.open(input_png_path).convert("RGB").resize((W, H))
         panel1 = np.array(img)
-        # Overlay mask boundary
         mask_bool = mask > 127 if mask.dtype == np.uint8 else mask > 0.5
-        from scipy.ndimage import binary_erosion
         edge = mask_bool & ~binary_erosion(mask_bool, iterations=2)
         panel1[edge] = [0, 255, 0]
     else:
@@ -454,13 +456,9 @@ def make_comparison_image(
         mask_bool = mask > 127 if mask.dtype == np.uint8 else mask > 0.5
         panel1[mask_bool] = [128, 128, 128]
 
-    # Panel 2: Before (projected vertices)
     panel2 = render_projected_vertices(verts_before, fx, fy, cx, cy, H, W, depth)
-
-    # Panel 3: After (projected vertices)
     panel3 = render_projected_vertices(verts_after, fx, fy, cx, cy, H, W, depth)
 
-    # Assemble
     gap = 4
     canvas_w = W * 3 + gap * 2
     canvas = np.ones((H + 40, canvas_w, 3), dtype=np.uint8) * 255
@@ -482,64 +480,13 @@ def make_comparison_image(
         draw.text((4, 4), f"{obj_name} - Mask", fill=(0, 0, 0), font=font)
         draw.text((W + gap + 4, 4), f"Before (rel_err={err_b:.1%})", fill=(180, 0, 0), font=font)
         draw.text((W * 2 + gap * 2 + 4, 4), f"After (rel_err={err_a:.1%})", fill=(0, 128, 0), font=font)
-
         img_pil.save(str(output_path))
     else:
-        # Fallback: save with matplotlib
         fig, ax = plt.subplots(1, 1, figsize=(canvas_w / 100, (H + 40) / 100), dpi=100)
         ax.imshow(canvas)
         ax.axis("off")
         fig.savefig(str(output_path), dpi=100, bbox_inches="tight", pad_inches=0)
         plt.close()
-
-
-def make_full_scene_comparison(
-    moge: dict,
-    objects: list[dict],
-    data_dir: Path,
-    output_dir: Path,
-    verts_before_all: dict,
-    verts_after_all: dict,
-):
-    """Create full-scene overlay: all objects projected before/after."""
-    H, W = moge["height"], moge["width"]
-    fx, fy, cx, cy = moge["fx"], moge["fy"], moge["cx"], moge["cy"]
-    depth = moge["depth"]
-
-    fig, axes = plt.subplots(1, 2, figsize=(14, 10))
-    fig.suptitle("Full Scene: Before vs After Depth Re-optimization", fontsize=14, fontweight="bold")
-
-    for panel_idx, (title, verts_dict) in enumerate([
-        ("Before", verts_before_all), ("After", verts_after_all)
-    ]):
-        ax = axes[panel_idx]
-        # Show MoGe depth as background
-        ax.imshow(depth, cmap="gray", alpha=0.3, vmin=depth.min(), vmax=depth.max())
-
-        colors = plt.cm.tab10(np.linspace(0, 1, len(objects)))
-        for i, obj in enumerate(objects):
-            name = obj["object_name"]
-            if name not in verts_dict:
-                continue
-            v = verts_dict[name]
-            v_cv = pt3d_to_opencv(v)
-            uv, z = project(v_cv, fx, fy, cx, cy)
-
-            valid = (uv[:, 0] >= 0) & (uv[:, 0] < W) & (uv[:, 1] >= 0) & (uv[:, 1] < H) & (z > 0)
-            step = max(1, valid.sum() // 2000)
-            uv_s = uv[valid][::step]
-            ax.scatter(uv_s[:, 0], uv_s[:, 1], s=0.3, c=[colors[i]], alpha=0.3, label=name, rasterized=True)
-
-        ax.set_title(title)
-        ax.set_xlim(0, W)
-        ax.set_ylim(H, 0)
-        ax.axis("off")
-        if panel_idx == 1:
-            ax.legend(fontsize=6, loc="upper right", markerscale=10)
-
-    plt.tight_layout()
-    fig.savefig(str(output_dir / "full_scene_comparison.png"), dpi=150, bbox_inches="tight")
-    plt.close()
 
 
 def make_dashboard(objects, stats_before_all, stats_after_all, output_dir):
@@ -548,7 +495,6 @@ def make_dashboard(objects, stats_before_all, stats_after_all, output_dir):
     err_b = [stats_before_all[n].get("depth_error_rel_mean", 0) * 100 for n in names]
     err_a = [stats_after_all[n].get("depth_error_rel_mean", 0) * 100 for n in names]
 
-    # Sort by before error
     order = np.argsort(err_b)[::-1]
     names_s = [names[i] for i in order]
     err_b_s = [err_b[i] for i in order]
@@ -563,10 +509,10 @@ def make_dashboard(objects, stats_before_all, stats_after_all, output_dir):
     ax.set_yticks(y)
     ax.set_yticklabels(names_s, fontsize=9)
     ax.set_xlabel("Relative Depth Error (%)")
-    ax.set_title("Depth Error: Before vs After Re-optimization", fontweight="bold")
+    ax.set_title("Depth Error: Before vs After ICP Re-optimization", fontweight="bold")
     ax.legend()
-    ax.axvline(5, color="green", ls="--", lw=0.8, alpha=0.4, label="5%")
-    ax.axvline(15, color="orange", ls="--", lw=0.8, alpha=0.4, label="15%")
+    ax.axvline(5, color="green", ls="--", lw=0.8, alpha=0.4)
+    ax.axvline(15, color="orange", ls="--", lw=0.8, alpha=0.4)
 
     for i, (b, a) in enumerate(zip(err_b_s, err_a_s)):
         improvement = b - a
@@ -584,13 +530,14 @@ def make_dashboard(objects, stats_before_all, stats_after_all, output_dir):
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Re-optimize SAM3D poses with depth loss")
+    parser = argparse.ArgumentParser(description="Re-optimize SAM3D poses with ICP + grown masks")
     parser.add_argument("--data-dir", type=Path, default=Path("output/sam3d_dining"))
     parser.add_argument("--output-dir", type=Path, default=None,
                         help="Output directory (default: <data-dir>_v2)")
-    parser.add_argument("--lambda-depth", type=float, default=1.0)
-    parser.add_argument("--lambda-mask", type=float, default=0.5)
-    parser.add_argument("--lambda-reg", type=float, default=0.01)
+    parser.add_argument("--icp-threshold", type=float, default=0.3,
+                        help="ICP max correspondence distance")
+    parser.add_argument("--edge-sigma", type=float, default=2.0,
+                        help="Depth edge threshold = median + edge_sigma * std")
     args = parser.parse_args()
 
     data_dir = args.data_dir.resolve()
@@ -607,14 +554,20 @@ def main():
     fx, fy, cx, cy = moge["fx"], moge["fy"], moge["cx"], moge["cy"]
     H, W = moge["height"], moge["width"]
     depth = moge["depth"]
+    pointmap = moge["points"]  # (H, W, 3) in PT3D camera space
 
-    # Copy MoGe npz to output dir for reference
+    # Precompute Sobel gradient of depth map (used for all objects)
+    sobel_mag = compute_depth_sobel(depth)
+
+    # Copy MoGe npz to output dir
     shutil.copy2(moge_path, output_dir / "target_moge.npz")
 
     print(f"Data: {data_dir}")
     print(f"Output: {output_dir}")
     print(f"Objects: {len(objects)}")
     print(f"Image: {W}x{H}, fx={fx:.2f}")
+    print(f"ICP threshold: {args.icp_threshold}")
+    print(f"Edge sigma: {args.edge_sigma}")
     print()
 
     new_transforms = []
@@ -642,10 +595,9 @@ def main():
         mask = np.load(str(mask_path)) if mask_path.exists() else np.ones((H, W), dtype=np.uint8) * 255
         mask_bool = mask > 127
 
-        # Centroid in PT3D space
         centroid = np.array(obj["translation"], dtype=np.float32)
 
-        # --- Before stats (mask-filtered) ---
+        # --- Before stats ---
         stats_b = compute_masked_depth_error(verts, mask_bool, depth, fx, fy, cx, cy, H, W)
         stats_before_all[name] = stats_b
         verts_before_all[name] = verts.copy()
@@ -655,42 +607,80 @@ def main():
               f"ratio={stats_b.get('scale_ratio', 0):.4f}  "
               f"valid={stats_b.get('valid_count', 0)}")
 
-        # --- Optimize ---
-        opt_result = optimize_object_pose(
-            verts, mask, depth, fx, fy, cx, cy, H, W, centroid,
-            glb_path=glb_path,
-            lambda_depth=args.lambda_depth,
-            lambda_mask=args.lambda_mask,
-            lambda_reg=args.lambda_reg,
+        # --- Grow mask toward convex hull ---
+        hull_mask = make_convex_hull_mask(mask_bool)
+        grown_mask = grow_mask_to_convex_hull(
+            mask_bool, depth, sobel_mag, edge_sigma=args.edge_sigma,
         )
 
-        dt = np.array(opt_result["dt"], dtype=np.float32)
-        ds = opt_result["ds"]
-        print(f"  Optimization: dt=[{dt[0]:+.4f}, {dt[1]:+.4f}, {dt[2]:+.4f}]  "
-              f"ds={ds:+.4f}  iters={opt_result['niter']}  loss={opt_result['loss']:.6f}")
+        # Compute threshold for visualization
+        sobel_in_mask = sobel_mag[mask_bool]
+        if len(sobel_in_mask) > 0:
+            edge_threshold = float(np.median(sobel_in_mask) + args.edge_sigma * np.std(sobel_in_mask))
+        else:
+            edge_threshold = 0.0
 
-        # --- Apply correction ---
-        verts_corrected = apply_correction(verts, centroid, dt, ds)
-        verts_after_all[name] = verts_corrected.copy()
+        n_orig = int(mask_bool.sum())
+        n_grown = int(grown_mask.sum())
+        n_hull = int(hull_mask.sum())
+        print(f"  Mask: original={n_orig:,}  hull={n_hull:,}  grown={n_grown:,}  "
+              f"(+{n_grown - n_orig:,} pixels, edge_thresh={edge_threshold:.4f})")
 
-        # --- After stats (mask-filtered) ---
-        stats_a = compute_masked_depth_error(verts_corrected, mask_bool, depth, fx, fy, cx, cy, H, W)
-        stats_after_all[name] = stats_a
+        # --- Visualize mask growth ---
+        vis_path = output_dir / f"{name}_mask_growth.png"
+        visualize_mask_growth(
+            mask_bool, grown_mask, hull_mask, depth, sobel_mag,
+            edge_threshold, name, vis_path,
+        )
+        print(f"  Saved: {vis_path.name}")
+
+        # --- Run ICP ---
+        verts_aligned, icp_info = run_icp_alignment(
+            verts, pointmap, grown_mask,
+            icp_threshold=args.icp_threshold,
+        )
+        verts_after_all[name] = verts_aligned.copy()
+
+        print(f"  ICP: fitness={icp_info['fitness']:.4f}  "
+              f"rmse={icp_info['rmse']:.4f}  "
+              f"target_pts={icp_info['n_target']:,}  "
+              f"source_pts={icp_info['n_source']:,}")
+
+        # --- After stats ---
+        stats_a = compute_masked_depth_error(verts_aligned, mask_bool, depth, fx, fy, cx, cy, H, W)
 
         improvement = (stats_b.get("depth_error_rel_mean", 0) - stats_a.get("depth_error_rel_mean", 0))
         symbol = "+" if improvement > 0 else ""
 
-        print(f"  AFTER:  rel_err={stats_a.get('depth_error_rel_mean', 0):.2%}  "
-              f"|err|={stats_a.get('depth_error_abs_mean', 0):.4f}  "
-              f"ratio={stats_a.get('scale_ratio', 0):.4f}  "
-              f"({symbol}{improvement:.2%} improvement)")
+        # Safety: skip ICP if it made things worse
+        applied_icp = True
+        if improvement < 0:
+            print(f"  ICP made depth worse ({improvement:+.2%}), keeping original pose")
+            verts_aligned = verts.copy()
+            stats_a = stats_b
+            icp_info["transformation"] = np.eye(4).tolist()
+            icp_info["skipped"] = True
+            applied_icp = False
+        else:
+            print(f"  AFTER:  rel_err={stats_a.get('depth_error_rel_mean', 0):.2%}  "
+                  f"|err|={stats_a.get('depth_error_abs_mean', 0):.4f}  "
+                  f"ratio={stats_a.get('scale_ratio', 0):.4f}  "
+                  f"({symbol}{improvement:.2%} improvement)")
+
+        verts_after_all[name] = verts_aligned.copy()
+        stats_after_all[name] = stats_a
 
         # --- Save corrected GLB ---
         scene = load_glb_scene(glb_path)
-        for geom in scene.geometry.values():
-            if hasattr(geom, "vertices"):
-                v = np.asarray(geom.vertices, dtype=np.float32)
-                geom.vertices = apply_correction(v, centroid, dt, ds)
+        T_icp = np.array(icp_info["transformation"], dtype=np.float64)
+        if applied_icp:
+            for geom in scene.geometry.values():
+                if hasattr(geom, "vertices"):
+                    v = np.asarray(geom.vertices, dtype=np.float64)
+                    ones = np.ones((len(v), 1), dtype=np.float64)
+                    v_h = np.hstack([v, ones])
+                    v_aligned = (v_h @ T_icp.T)[:, :3]
+                    geom.vertices = v_aligned.astype(np.float32)
         out_glb = output_dir / f"{name}.glb"
         scene.export(str(out_glb))
 
@@ -701,18 +691,18 @@ def main():
             shutil.copy2(png_path, output_dir / f"{name}.png")
 
         # --- Save info JSON ---
-        new_centroid = centroid + dt
         new_transform = {
             "glb_path": str(out_glb),
-            "translation": new_centroid.tolist(),
+            "translation": obj["translation"],
             "rotation": obj["rotation"],
-            "scale": [float(s * (1.0 + ds)) for s in obj["scale"]],
+            "scale": obj["scale"],
             "pointmap_shape": obj.get("pointmap_shape", [H, W, 3]),
             "object_name": name,
+            "icp_transformation": icp_info["transformation"],
         }
         new_transforms.append(new_transform)
 
-        info = {**new_transform, "correction": {"dt": dt.tolist(), "ds": ds}}
+        info = {**new_transform, "icp_info": icp_info}
         with open(output_dir / f"{name}_info.json", "w", encoding="utf-8") as f:
             json.dump(info, f, indent=2)
 
@@ -720,13 +710,13 @@ def main():
         compare_path = output_dir / f"{name}_compare.png"
         make_comparison_image(
             png_path if png_path.exists() else None,
-            mask, verts, verts_corrected, depth, fx, fy, cx, cy, H, W,
+            mask, verts, verts_aligned, depth, fx, fy, cx, cy, H, W,
             name, stats_b, stats_a, compare_path,
         )
         print(f"  Saved: {compare_path.name}")
 
         # --- Per-object render (after only) ---
-        render_img = render_projected_vertices(verts_corrected, fx, fy, cx, cy, H, W, depth)
+        render_img = render_projected_vertices(verts_aligned, fx, fy, cx, cy, H, W, depth)
         if Image:
             Image.fromarray(render_img).save(str(output_dir / f"{name}_render.png"))
 
@@ -737,16 +727,9 @@ def main():
         json.dump(new_transforms, f, indent=2)
 
     # --- Save results JSON ---
-    results = {
-        "before": stats_before_all,
-        "after": stats_after_all,
-    }
+    results = {"before": stats_before_all, "after": stats_after_all}
     with open(output_dir / "depth_alignment_results.json", "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, default=str)
-
-    # --- Full scene comparison ---
-    print("Generating full scene comparison...")
-    make_full_scene_comparison(moge, objects, data_dir, output_dir, verts_before_all, verts_after_all)
 
     # --- Dashboard ---
     print("Generating dashboard...")
