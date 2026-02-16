@@ -94,42 +94,45 @@ All three fixes committed as `d82b86e`: *"Fix SAM3D vertex transform bugs and ad
 
 ## 3. Before vs After Comparison
 
-The broken transforms made objects completely invisible through the MoGe camera — they were placed at wrong positions, entirely outside the camera frustum. The "BEFORE" renders below are blank because no object geometry falls within the camera view.
+The broken transforms produced scenes where objects were visible but completely misaligned — wrong positions, wrong orientations, wrong scale. The bottle is sideways, objects are clustered together instead of spread across the scene, and nothing matches the spatial layout of the target photograph.
 
-### Full Scene
+The pre-fix renders below are from `output/aligned_test/`, produced during debugging before the root cause was identified.
 
-![before_after_full_scene](../output/sam3d_rerun_fixed/before_after_full_scene.png)
+### Full Scene — Initial Broken Result
 
-*Left: Target photograph. Center: Pre-fix render (empty — all objects outside camera). Right: Post-fix render (6 objects correctly placed).*
+![before_after_auto](../output/sam3d_rerun_fixed/before_after_auto_vs_fixed.png)
 
-### Ito En Bottle (best result)
+*Left: Target photograph. Center: Pre-fix render — objects clustered, bottle sideways, headphones tiny, no spatial correspondence. Right: Post-fix render — 6 objects correctly placed matching the photograph.*
 
-![before_after_bottle](../output/sam3d_rerun_fixed/before_after_bottle.png)
+### Full Scene — Best Pre-Fix Attempt
 
-### Alienware Keyboard
+![before_after_final](../output/sam3d_rerun_fixed/before_after_final_vs_fixed.png)
 
-![before_after_keyboard](../output/sam3d_rerun_fixed/before_after_keyboard.png)
+*Even after manual debugging attempts, the pre-fix scene remained upside-down with objects floating in wrong positions.*
 
-### Envelope
+### Pre-Fix Debugging Progression
 
-![before_after_envelope](../output/sam3d_rerun_fixed/before_after_envelope.png)
+Multiple attempts were made to fix the alignment before the root cause was found:
 
-### Headphones
+| Render | Description |
+|---|---|
+| ![greentea_auto](../output/aligned_test/greentea_auto.png) | `greentea_auto.png` — First automatic render. Objects clustered, bottle sideways, headphones a tiny ring in upper right. |
+| ![greentea_final](../output/aligned_test/greentea_final.png) | `greentea_final.png` — After camera adjustments. Scene is upside-down, objects still floating. |
+| ![greentea_fixed_v2](../output/aligned_test/greentea_fixed_v2.png) | `greentea_fixed_v2.png` — Attempted transform corrections. Layout slightly better but still wrong. |
+| ![greentea_fixed_v3](../output/aligned_test/greentea_fixed_v3.png) | `greentea_fixed_v3.png` — More corrections. Objects still mispositioned and scene flipped. |
 
-![before_after_headphones](../output/sam3d_rerun_fixed/before_after_headphones.png)
+### Multi-View Diagnostic
 
-### Desk Surface
+Camera sweep renders (`output/aligned_test/multi_view/`, `output/aligned_test/sweep/`) were used to understand the 3D arrangement of objects in the broken scene. These confirmed the objects were all displaced from their correct positions, not just a camera issue.
 
-![before_after_desk](../output/sam3d_rerun_fixed/before_after_desk.png)
-
-### Why "BEFORE" Is Blank
+### What the Bugs Did
 
 The three bugs combined meant:
-1. **Translation lost** (Bug 1) — objects placed at origin instead of their MoGe-estimated 3D positions
-2. **X-axis mirrored** (Bug 2) — coordinates negated on one axis
-3. The resulting vertex positions fell entirely outside the MoGe camera frustum, producing empty renders
+1. **Translation lost** (Bug 1) — translation stored in wrong matrix position, so objects were placed near origin instead of their MoGe-estimated 3D positions
+2. **X-axis mirrored** (Bug 2) — pre-transform negated X, flipping the entire scene horizontally
+3. **Dead post-transforms** (Bug 3) — three rotation matrices that cancelled to identity, adding confusion during debugging
 
-This confirms the fix was necessary and effective: the same TRELLIS reconstructions, re-run with correct transforms, produce properly aligned 3D renders.
+After fixing all three bugs and re-running TRELLIS, the same pipeline produced correctly aligned 3D reconstructions matching the target photograph.
 
 ---
 
