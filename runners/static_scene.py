@@ -264,7 +264,7 @@ def main() -> None:
     parser.add_argument("--explicit-comp", action="store_true", help="Enable explicit completion")
     parser.add_argument("--text-only", action="store_true", help="Only use text as reference")
     parser.add_argument("--init-setting", choices=["none", "minimal", "reasonable"], default="none", help="Setting for the static scene task")
-    parser.add_argument("--prompt-setting", choices=["none", "procedural", "scene_graph", "get_asset"], default="none", help="Setting for the prompt")
+    parser.add_argument("--prompt-setting", choices=["none", "procedural", "scene_graph", "get_asset", "get_asset_simple", "get_asset_sam3d"], default="none", help="Setting for the prompt")
     
     args = parser.parse_args()
     

@@ -64,12 +64,12 @@ class Executor:
             gpu_devices: Optional CUDA device specification.
         """
         self.blender_command = blender_command
-        self.blender_file = blender_file
-        self.blender_script = blender_script
+        self.blender_file = str(Path(blender_file).resolve())
+        self.blender_script = str(Path(blender_script).resolve())
         self.base = os.path.dirname(script_save)
-        self.script_path = Path(script_save)
-        self.render_path = Path(render_save)
-        self.blender_save = blender_save
+        self.script_path = Path(script_save).resolve()
+        self.render_path = Path(render_save).resolve()
+        self.blender_save = str(Path(blender_save).resolve()) if blender_save else blender_save
         self.gpu_devices = gpu_devices
         self.count = 0
 
@@ -122,11 +122,28 @@ class Executor:
         try:
             # Propagate render directory to scripts
             env["RENDER_DIR"] = str(run_dir)
-            proc = subprocess.run(" ".join(cmd), shell=True, check=True, capture_output=True, text=True, env=env)
+            import sys as _sys
+            import tempfile
+            if _sys.platform == "win32":
+                cmd_str = ' '.join(f'"{c}"' if ' ' in c else c for c in cmd)
+            else:
+                cmd_str = ' '.join(cmd)
+            # Write output to temp files to avoid pipe deadlocks on Windows
+            with tempfile.NamedTemporaryFile(mode='w', suffix='_stdout.txt', delete=False, encoding='utf-8') as f_out, \
+                 tempfile.NamedTemporaryFile(mode='w', suffix='_stderr.txt', delete=False, encoding='utf-8') as f_err:
+                stdout_file, stderr_file = f_out.name, f_err.name
+            with open(stdout_file, 'w', encoding='utf-8') as f_out, open(stderr_file, 'w', encoding='utf-8') as f_err:
+                proc = subprocess.run(cmd_str, shell=True, check=True, stdin=subprocess.DEVNULL, stdout=f_out, stderr=f_err, env=env, timeout=300)
+            with open(stdout_file, 'r', encoding='utf-8', errors='replace') as f:
+                out = f.read()
+            with open(stderr_file, 'r', encoding='utf-8', errors='replace') as f:
+                err = f.read()
+            os.unlink(stdout_file)
+            os.unlink(stderr_file)
             imgs = sorted([str(p) for p in run_dir.glob("*") if p.suffix.lower() in [".png", ".jpg", ".jpeg"]])
             # If no image output
             if not os.path.exists(f"{self.base}/tmp/camera_info.json"):
-                return {"status": "success", "output": {"text": [proc.stdout]}}
+                return {"status": "success", "output": {"text": [out]}}
             # If image output
             with open(f"{self.base}/tmp/camera_info.json", "r") as f:
                 camera_info = json.load(f)
@@ -135,8 +152,17 @@ class Executor:
                     camera['rotation'] = [round(x, 2) for x in camera['rotation']]
             return {"status": "success", "output": {"image": imgs, "text": ["Camera parameters: " + str(camera) for camera in camera_info]}}
         except subprocess.CalledProcessError as e:
-            logging.error(f"Blender failed: {e.stderr}")
-            return {"status": "error", "output": {"text": [e.stderr or e.stdout]}}
+            logging.error(f"Blender failed: {e}")
+            try:
+                with open(stderr_file, 'r', encoding='utf-8', errors='replace') as f:
+                    err = f.read()
+                with open(stdout_file, 'r', encoding='utf-8', errors='replace') as f:
+                    out = f.read()
+                os.unlink(stdout_file)
+                os.unlink(stderr_file)
+            except Exception:
+                out, err = "", str(e)
+            return {"status": "error", "output": {"text": [err or out]}}
 
     def execute(self, full_code: str) -> Dict[str, Any]:
         """Execute Blender code and return results.
@@ -149,7 +175,7 @@ class Executor:
         """
         run_dir = self.next_run_dir()
         code_file = self.script_path / f"{self.count}.py"
-        with open(code_file, "w") as f:
+        with open(code_file, "w", encoding="utf-8") as f:
             f.write(full_code)
         result = self._execute_blender(code_file, run_dir)
         # Remove empty run directories
@@ -198,7 +224,7 @@ class Investigator3D:
         """
         self.blender_file = blender_path
         self.blender_command = blender_command
-        self.base = Path(save_dir)
+        self.base = Path(save_dir).resolve()
         self.base.mkdir(parents=True, exist_ok=True)
         self.tmp_dir = self.base / "tmp"
         self.tmp_dir.mkdir(parents=True, exist_ok=True)

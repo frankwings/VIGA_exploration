@@ -42,16 +42,14 @@ class MeshyAPI:
             save_dir: Directory for saving downloaded assets.
             previous_assets_dir: Directory to check for cached assets.
 
-        Raises:
-            ValueError: If no API key is provided.
+        Note:
+            API key is optional. Without it, only local asset lookup works.
         """
-        self.api_key = api_key or os.getenv("MESHY_API_KEY")
-        if not self.api_key:
-            raise ValueError("Meshy API key is required. Set MESHY_API_KEY environment variable or pass api_key parameter.")
+        self.api_key = api_key or os.getenv("MESHY_API_KEY") or None
         self.base_url = "https://api.meshy.ai"
-        self.headers = {"Authorization": f"Bearer {self.api_key}"}
-        self.save_dir = previous_assets_dir
-        self.previous_assets_dir = previous_assets_dir
+        self.headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        self.save_dir = os.path.abspath(previous_assets_dir).replace(os.sep, '/') if previous_assets_dir else previous_assets_dir
+        self.previous_assets_dir = os.path.abspath(previous_assets_dir).replace(os.sep, '/') if previous_assets_dir else previous_assets_dir
         os.makedirs(self.save_dir, exist_ok=True)
         if self.previous_assets_dir:
             os.makedirs(self.previous_assets_dir, exist_ok=True)
@@ -118,7 +116,7 @@ class MeshyAPI:
                         continue
                 base_normalized = self.normalize_name(base_name)
                 if base_normalized in target_normalized or target_normalized in base_normalized:
-                    matching_files.append(os.path.join(self.previous_assets_dir, filename))
+                    matching_files.append(self.previous_assets_dir + '/' + filename)
         except OSError as e:
             logging.warning(f"Error reading previous_assets directory: {e}")
         return matching_files

@@ -200,7 +200,7 @@ def save_thought_process(memory: List[Dict], thought_save: str, current_round: i
         else:
             filename = thought_save
         
-        with open(filename, "w") as f:
+        with open(filename, "w", encoding="utf-8") as f:
             json.dump(memory, f, indent=4, ensure_ascii=False)
     except Exception as e:
         logging.error(f"Failed to save thought process: {e}")

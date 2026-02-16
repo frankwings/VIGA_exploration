@@ -6,6 +6,7 @@ based on visual targets, using tool calls to execute and evaluate the generated 
 
 import json
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
@@ -62,6 +63,46 @@ class GeneratorAgent:
         self.system_prompt = self.prompt_builder.build_prompt("generator", "system")
         self.memory.extend(self.system_prompt)
 
+    def _inject_sam3d_from_dir(self, sam3d_dir: str) -> None:
+        """Load SAM3D GLB paths and transforms from a directory and inject into memory.
+
+        Args:
+            sam3d_dir: Path to directory containing SAM3D .glb files and object_transforms.json.
+        """
+        sam3d_dir = str(Path(sam3d_dir).resolve())
+        transforms_path = os.path.join(sam3d_dir, "object_transforms.json")
+
+        # Discover GLB files
+        glb_files = sorted(f for f in os.listdir(sam3d_dir) if f.endswith(".glb"))
+        if not glb_files:
+            print(f"Warning: No .glb files found in {sam3d_dir}")
+            return
+
+        # Load transforms
+        transforms = {}
+        if os.path.exists(transforms_path):
+            with open(transforms_path, 'r', encoding='utf-8') as tf:
+                transforms_list = json.load(tf)
+            for t in transforms_list:
+                t_name = os.path.splitext(os.path.basename(t["glb_path"]))[0]
+                transforms[t_name] = t
+
+        # Build info string
+        sam3d_info = f"SAM3D reconstructed {len(glb_files)} objects from the target image:\n"
+        for glb_file in glb_files:
+            abs_p = os.path.join(sam3d_dir, glb_file).replace("\\", "/")
+            name = glb_file.replace(".glb", "")
+            sam3d_info += f"- {name}: {abs_p}\n"
+            if name in transforms:
+                t = transforms[name]
+                sam3d_info += f"  translation: {t['translation']}\n"
+                sam3d_info += f"  rotation (quaternion xyzw): {t['rotation']}\n"
+                sam3d_info += f"  scale: {t['scale']}\n"
+
+        self.memory[1]['content'].append({"type": "text", "text": sam3d_info})
+        print(f"SAM3D results injected into memory: {len(glb_files)} objects (with transforms)")
+        print(f"SAM3D info:\n{sam3d_info}")
+
     async def run(self) -> None:
         """Run the generator agent loop to produce and refine code.
 
@@ -70,15 +111,31 @@ class GeneratorAgent:
         """
         print("\n=== Running generator agent ===\n")
 
-        # If init.py is in the tool servers, auto-call reconstruct_full_scene
-        # to initialize the 3D scene before the conversation begins.
-        try:
-            if any("init.py" in server for server in self.tool_client.tool_servers):
-                print("=== Auto-calling init.reconstruct_full_scene to initialize scene ===")
-                _ = await self.tool_client.call_tool("reconstruct_full_scene", {})
-                print("=== init.reconstruct_full_scene finished ===")
-        except Exception as e:
-            print(f"Warning: auto init reconstruct_full_scene failed: {e}")
+        # Load SAM3D results into Generator memory.
+        # Option A: --sam3d-results points to an existing directory (skip reconstruction).
+        # Option B: init.py tool server is present (run SAM3D reconstruction live).
+        sam3d_results_dir = self.config.get("sam3d_results")
+        if sam3d_results_dir:
+            # Load pre-existing SAM3D results from directory
+            print(f"=== Loading pre-existing SAM3D results from: {sam3d_results_dir} ===")
+            self._inject_sam3d_from_dir(sam3d_results_dir)
+        else:
+            # If init.py is in the tool servers, auto-call reconstruct_full_scene
+            try:
+                if any("init.py" in server for server in self.tool_client.tool_servers):
+                    print("=== Auto-calling init.reconstruct_full_scene to initialize scene ===")
+                    result = await self.tool_client.call_tool("reconstruct_full_scene", {})
+                    print("=== init.reconstruct_full_scene finished ===")
+                    # ExternalToolClient.call_tool() returns the unwrapped inner dict
+                    # (i.e. result['output']), so we check for 'data' directly.
+                    data = result.get("data") if isinstance(result, dict) else None
+                    if data:
+                        glb_paths = data.get("glb_paths", [])
+                        if glb_paths:
+                            sam3d_dir = str(Path(glb_paths[0]).resolve().parent)
+                            self._inject_sam3d_from_dir(sam3d_dir)
+            except Exception as e:
+                print(f"Warning: auto init reconstruct_full_scene failed: {e}")
 
         for i in range(self.config.get("max_rounds")):
             print(f"=== Round {i} ===\n")
@@ -153,7 +210,7 @@ class GeneratorAgent:
                     
                 tool_response = await self.tool_client.call_tool(tool_name, tool_arguments)
                 if tool_name == "get_better_object":
-                    with open(self.config.get("output_dir") + f"/_tool_call.json", "w") as f:
+                    with open(self.config.get("output_dir") + f"/_tool_call.json", "w", encoding="utf-8") as f:
                         json.dump({'name': tool_name, 'arguments': tool_arguments, 'response': tool_response}, f, indent=4, ensure_ascii=False)
                 
                 # If the tool is execute_and_evaluate, run the verifier
@@ -242,7 +299,7 @@ class GeneratorAgent:
     def _save_memory(self) -> None:
         """Save the conversation memory to a JSON file in the output directory."""
         output_file = self.config.get("output_dir") + "/generator_memory.json"
-        with open(output_file, "w") as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             json.dump(self.memory, f, indent=4, ensure_ascii=False)
     
     async def cleanup(self) -> None:

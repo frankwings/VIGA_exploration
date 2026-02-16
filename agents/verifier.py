@@ -208,7 +208,7 @@ class VerifierAgent:
     def _save_memory(self) -> None:
         """Save the persistent memory to a JSON file in the output directory."""
         output_file = self.config.get("output_dir") + "/verifier_memory.json"
-        with open(output_file, "w") as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             json.dump(self.saved_memory, f, indent=4, ensure_ascii=False)
 
     async def cleanup(self) -> None:

@@ -339,8 +339,8 @@ def initialize(args: Dict[str, object]) -> Dict[str, object]:
 
         if va_api_key and target_image_path:
             _image_cropper = ImageCropper(va_api_key, target_image_path)
-        if meshy_api_key:
-            _meshy_api = MeshyAPI(meshy_api_key, save_dir, previous_assets_dir)
+        if meshy_api_key or previous_assets_dir:
+            _meshy_api = MeshyAPI(meshy_api_key or None, save_dir, previous_assets_dir)
         return {
             "status": "success",
             "output": {"text": ["Meshy initialize completed"], "tool_configs": tool_configs}
@@ -377,10 +377,16 @@ def get_better_object(
 
     try:
         global _meshy_api
+        if _meshy_api is None:
+            return {"status": "error", "output": {"text": ["MeshyAPI not initialized. Call initialize first."]}}
         previous_asset = _meshy_api.check_previous_asset(object_name, is_animated=rig_and_animate, is_rigged=rig_and_animate)
         if previous_asset:
             logging.info(f"[Meshy] Using previous static asset from image: {previous_asset}")
             return {'status': 'success', 'output': {'text': [f"Successfully generated static asset, downloaded to: {previous_asset}"]}}
+
+        # No local asset found — need Meshy API key for remote generation
+        if not _meshy_api.api_key:
+            return {"status": "error", "output": {"text": [f"No local asset found for '{object_name}' and no Meshy API key configured for remote generation."]}}
 
         if reference_type == "text":
             description = (object_description or object_name or "").strip()

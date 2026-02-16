@@ -17,8 +17,8 @@ from pptx.enum.text import PP_ALIGN
 from pptx.enum.shapes import MSO_SHAPE
 
 DOCS = Path("docs")
-OUT_FULL = Path("docs/VIGA_Project_Summary_v5.pptx")
-OUT_SMALL = Path("docs/VIGA_Project_Summary_v5_small.pptx")
+OUT_PART1 = Path("docs/VIGA_Project_Summary_v5_part1.pptx")
+OUT_PART2 = Path("docs/VIGA_Project_Summary_v5_part2.pptx")
 
 # Max pixels per inch for embedded images (used only in compressed mode)
 EMBED_DPI = 150
@@ -38,6 +38,8 @@ ACCENT_ORANGE = RGBColor(0xD2, 0x99, 0x22)
 
 SLIDE_W = Inches(13.333)
 SLIDE_H = Inches(7.5)
+
+GITHUB_DOCS_BASE = "https://github.com/frankwings/VIGA_exploration/blob/main/docs/"
 
 
 # ============================================================================
@@ -76,6 +78,23 @@ def add_multiline(slide, left, top, width, height, lines, size=12, color=TEXT_PR
         p.font.color.rgb = color
         p.font.name = "Segoe UI"
         p.space_after = Pt(3)
+    return tb
+
+
+def add_hyperlink(slide, left, top, width, height, text, url,
+                  size=10, color=ACCENT_BLUE):
+    """Add a textbox with a clickable hyperlink."""
+    tb = slide.shapes.add_textbox(left, top, width, height)
+    tf = tb.text_frame
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.RIGHT
+    r = p.add_run()
+    r.text = text
+    r.font.size = Pt(size)
+    r.font.color.rgb = color
+    r.font.name = "Segoe UI"
+    r.font.underline = True
+    r.hyperlink.address = url
     return tb
 
 
@@ -471,15 +490,18 @@ def make_closing_slide(prs):
 # ============================================================================
 
 def process_entry(prs, date_str, author, entry):
+    source_md = entry.get("source_md")
     t = entry["type"]
     if t == "run":
         make_run_overview(prs, date_str, author, entry["title"], entry["summary"],
                           entry.get("input_img"), entry.get("output_img"))
+        first_slide = prs.slides[len(prs.slides) - 1]
         if entry.get("rounds"):
             make_run_rounds(prs, date_str, entry["title"], entry["rounds"])
     elif t == "analysis":
         make_text_page(prs, date_str, author, "Analysis", ACCENT_PURPLE,
                        entry["title"], entry["summary"], entry.get("key_points", []))
+        first_slide = prs.slides[len(prs.slides) - 1]
         if entry.get("images"):
             make_large_image_pages(prs, date_str, entry["title"], entry["images"])
     elif t == "summary":
@@ -489,14 +511,23 @@ def process_entry(prs, date_str, author, entry):
             # Page 1: all text, Page 2+: images
             make_text_page(prs, date_str, author, "Summary", ACCENT_ORANGE,
                            entry["title"], entry["summary"], kp)
+            first_slide = prs.slides[len(prs.slides) - 1]
             make_large_image_pages(prs, date_str, entry["title"], imgs)
         else:
             # No images: split key points across 2 pages
             mid = max(len(kp) // 2, 1)
             make_text_page(prs, date_str, author, "Summary", ACCENT_ORANGE,
                            entry["title"], entry["summary"], kp[:mid])
+            first_slide = prs.slides[len(prs.slides) - 1]
             make_text_page(prs, date_str, author, "Summary (cont.)", ACCENT_ORANGE,
                            entry["title"], "", kp[mid:] if len(kp) > mid else ["(continued)"])
+    else:
+        first_slide = None
+
+    if source_md and first_slide:
+        url = GITHUB_DOCS_BASE + source_md
+        add_hyperlink(first_slide, Inches(8.5), Inches(7.15), Inches(4.5), Inches(0.3),
+                      "View on GitHub \u2192", url, 10, ACCENT_BLUE)
 
 
 # ============================================================================
@@ -514,6 +545,7 @@ DATES = [
             {
                 "type": "analysis",
                 "title": "VIGA Pipeline Revisited",
+                "source_md": "20260212_VIGA_PIPELINE_REVISITED.md",
                 "summary": "Detailed pipeline architecture: SAM3D reconstruction, Meshy text-to-3D, "
                            "Generator/Verifier agents, Blender executor. Per-module inputs/outputs, "
                            "pipeline modes, environment setup, and agent tools reference.",
@@ -544,6 +576,7 @@ DATES = [
             {
                 "type": "run",
                 "title": "Dynamic Scene: Artist Run 2 (SAM3D Fixed)",
+                "source_md": "20260211_DynamicScene_Artist_Run2_Results.md",
                 "summary": "SAM3D injection bug fixed. Pre-computed GLBs loaded via --sam3d-results. "
                            "Generator kept 5/8 SAM3D objects (fruits), replaced jug/plate/pear with Meshy cache. "
                            "50% faster than Run 1 (99 min vs 203 min). 21 rounds.",
@@ -573,6 +606,7 @@ DATES = [
             {
                 "type": "run",
                 "title": "Dynamic Scene: Artist Run 1 (SAM3D + Meshy)",
+                "source_md": "20260210_DynamicScene_Artist_Run1_Results.md",
                 "summary": "First SAM3D-initialized dynamic scene. 8 objects reconstructed but injection bug "
                            "(generator.py:81) meant Generator never received paths — replaced ALL with Meshy. "
                            "Ball physics too subtle. 18 rounds, 203 min.",
@@ -602,6 +636,7 @@ DATES = [
             {
                 "type": "run",
                 "title": "SAM3D+Meshy Static Scene Run 1",
+                "source_md": "20260210_SAM3D_Meshy_Run1_Results.md",
                 "summary": "First combined SAM3D+Meshy static scene. SAM3D reconstructed 6 objects but Generator "
                            "replaced all with Meshy (4 cached, 1 new API). 25 rounds, 2h14m.",
                 "input_img": "test_results_images/sam3d_meshy_run1/target.png",
@@ -624,6 +659,7 @@ DATES = [
             {
                 "type": "analysis",
                 "title": "SAM3D+Meshy Combined Pipeline Design",
+                "source_md": "20260210_SAM3D_Meshy_Combined_Pipeline.md",
                 "summary": "Technical design for combining SAM3D reconstruction with Meshy text-to-3D. "
                            "SAM3D initializes scene from target image, Meshy replaces poor-quality objects.",
                 "key_points": [
@@ -653,6 +689,7 @@ DATES = [
             {
                 "type": "run",
                 "title": "Static Scene: Green Tea Run 11",
+                "source_md": "20260209_StaticScene_GreenTea_Run11_Results.md",
                 "summary": "19 rounds with AABB collision avoidance and non-uniform table scaling. "
                            "Bottle Japanese label text visible by round 11. Cached Meshy assets.",
                 "input_img": "test_results_images/greentea/target.png",
@@ -667,6 +704,7 @@ DATES = [
             {
                 "type": "run",
                 "title": "Static Scene: Green Tea Run 10",
+                "source_md": "20260209_StaticScene_GreenTea_Run10_Results.md",
                 "summary": "19 rounds. Night-desk aesthetic with blue monitor glow. Introduced orient_group_min_z() "
                            "rotation helper for finding flattest object orientation. Cached Meshy assets.",
                 "input_img": "test_results_images/greentea/target.png",
@@ -686,6 +724,7 @@ DATES = [
             {
                 "type": "run",
                 "title": "Static Scene: Green Tea Run 9 (Meshy API)",
+                "source_md": "20260208_StaticScene_GreenTea_Run9_Results.md",
                 "summary": "First run with Meshy API text-to-3D for all 5 assets. Dramatically higher quality than "
                            "SAM3D: recognizable PET bottle, RGB keyboard, headphones. Cinematic hero shot.",
                 "input_img": "test_results_images/greentea/target.png",
@@ -705,6 +744,7 @@ DATES = [
             {
                 "type": "run",
                 "title": "Static Scene: Green Tea Run 8",
+                "source_md": "20260208_StaticScene_GreenTea_Run8_Results.md",
                 "summary": "First run with Meshy API key configured (but never called — all 5 assets matched locally). "
                            "Slight regression in R6 (objects lost from camera view).",
                 "input_img": "test_results_images/greentea/target.png",
@@ -724,6 +764,7 @@ DATES = [
             {
                 "type": "run",
                 "title": "Static Scene: Green Tea Run 7 (get_asset_simple)",
+                "source_md": "20260208_StaticScene_GreenTea_Run7_Results.md",
                 "summary": "New prompt setting forbids procedural geometry — only GLB imports allowed. "
                            "All 5 SAM3D assets loaded and arranged over 9 rounds. Zero procedural violations.",
                 "input_img": "test_results_images/greentea/target.png",
@@ -746,6 +787,7 @@ DATES = [
             {
                 "type": "run",
                 "title": "Static Scene: Green Tea Run 5 (First GLB Import)",
+                "source_md": "20260208_StaticScene_GreenTea_Run5_Results.md",
                 "summary": "First run where absolute path fix enabled successful GLB asset imports. "
                            "25 rounds, 14 renders. Progression from overexposed early renders to full scene.",
                 "input_img": "test_results_images/greentea/target.png",
@@ -767,6 +809,7 @@ DATES = [
             {
                 "type": "analysis",
                 "title": "Asset Pipeline Root Cause (Run 4)",
+                "source_md": "20260208_StaticScene_GreenTea_AssetRun.md",
                 "summary": "Root cause analysis: GLB imports failed silently due to relative path resolution in Blender. "
                            "Fix: meshy_api.py resolves to absolute paths with forward slashes.",
                 "key_points": [
@@ -799,6 +842,7 @@ DATES = [
             {
                 "type": "run",
                 "title": "Static Scene: Green Tea First Run (58 rounds)",
+                "source_md": "20260207_StaticScene_GreenTea_Results.md",
                 "summary": "First static scene run with --prompt-setting=none. 58 scripts, 36 renders, ~4 hours. "
                            "No GLB assets (MeshyAPI init failed). Severe scene drift after round 25.",
                 "input_img": "test_results_images/greentea/target.png",
@@ -838,6 +882,7 @@ DATES = [
             {
                 "type": "run",
                 "title": "Dynamic Scene: Artist Baseline",
+                "source_md": "20260206_DynamicScene_Artist_Baseline_Results.md",
                 "summary": "First dynamic scene on Windows with GPT-5. Cezanne still life. Procedural geometry only "
                            "(no SAM3D/Meshy). 12 rounds with physics-based ball-throwing animation.",
                 "input_img": "test_results_images/dynamic_artist_baseline/target.png",
@@ -860,6 +905,7 @@ DATES = [
             {
                 "type": "analysis",
                 "title": "Windows Compatibility Fixes",
+                "source_md": "20260206_DynamicScene_Windows_Experience.md",
                 "summary": "Four major Windows issues identified and fixed when running VIGA dynamic scene pipeline.",
                 "key_points": [
                     "Issue 1: Blender path resolution",
@@ -895,6 +941,7 @@ DATES = [
             {
                 "type": "summary",
                 "title": "SAM3D Pipeline Complete (5/5 Objects)",
+                "source_md": "20260205_SAM3D_Pipeline_Complete.md",
                 "summary": "End-to-end SAM + SAM3D pipeline completed. 100% success (5/5 objects) on green tea scene. "
                            "SAM segmentation -> mask extraction -> SAM3D reconstruction -> GLB export. ~2 hrs on RTX 5080.",
                 "key_points": [
@@ -927,6 +974,7 @@ DATES = [
             {
                 "type": "summary",
                 "title": "SAM Segmentation Results",
+                "source_md": "20260204_SAM_SegmentationResults.md",
                 "summary": "SAM segmented green tea desktop scene: 145 raw masks filtered to 8, identifying 5 objects.",
                 "key_points": [
                     "Input: green tea desktop photograph",
@@ -947,6 +995,7 @@ DATES = [
             {
                 "type": "summary",
                 "title": "SAM3D All-Masks Results",
+                "source_md": "20260204_SAM3D_AllMasks.md",
                 "summary": "SAM3D all-masks pipeline: 6 objects reconstructed with X and Y rotation GIFs.",
                 "key_points": [
                     "6 objects: green tea bottle, Ito En bottle, bottle cap, label wrap, bottle neck, headphones",
@@ -966,6 +1015,7 @@ DATES = [
             {
                 "type": "analysis",
                 "title": "SAM3D AllMasks Test Investigation",
+                "source_md": "20260204_SAM3D_AllMasks_TestResults.md",
                 "summary": "4 rounds of mask quality investigation. Direct pipeline test failed (missing open3d). "
                            "Discovered mask format issue and reassessed quality metrics.",
                 "key_points": [
@@ -982,6 +1032,7 @@ DATES = [
             {
                 "type": "analysis",
                 "title": "SAM3D Rotation Optimization",
+                "source_md": "20260204_SAM3D_Optimization.md",
                 "summary": "Quaternion vs Euler rotation for rendering SAM3D GLBs in Blender. "
                            "Quaternion rotation avoids gimbal lock.",
                 "key_points": [
@@ -1013,6 +1064,7 @@ DATES = [
             {
                 "type": "run",
                 "title": "SAM3D Bottle Test (Windows)",
+                "source_md": "20260203_SAM3D_BOTTLE_TEST.md",
                 "summary": "Successful SAM3D bottle reconstruction. Single green tea bottle -> 379K-vertex 3D mesh "
                            "(15MB GLB) in ~9 minutes on RTX 5080. Proper geometry and vertex colors confirmed.",
                 "input_img": "test_results_images/test_sam/ito_en_green_tea_bottle.png",
@@ -1022,6 +1074,7 @@ DATES = [
             {
                 "type": "run",
                 "title": "SAM3D Windows Native Test",
+                "source_md": "20260203_SAM3D_WINDOWS_TEST.md",
                 "summary": "First SAM3D on Windows 11. Single-image to 3D mesh generation. "
                            "Windows outperformed WSL for SAM3D inference speed.",
                 "input_img": "test_results_images/01_greentea_input.jpg",
@@ -1031,6 +1084,7 @@ DATES = [
             {
                 "type": "analysis",
                 "title": "Debug: Flat Mesh Issue",
+                "source_md": "20260203_SAM3D_DEBUG.md",
                 "summary": "Root cause: SAM3D produced flat table shape instead of bottle. Wrong input image used "
                            "(inverted mask showing table background with bottle cut out).",
                 "key_points": [
@@ -1050,6 +1104,7 @@ DATES = [
             {
                 "type": "analysis",
                 "title": "VIGA Workflow: SAM3D Call",
+                "source_md": "20260203_VIGA_WORKFLOW.md",
                 "summary": "Complete SAM3D call from image to 3D mesh. Documents pipeline workflow, output JSON, "
                            "mesh structure (flat 'billboard' mesh problem), and disabled mesh post-processing root cause.",
                 "key_points": [
@@ -1068,6 +1123,7 @@ DATES = [
                 "type": "analysis",
                 "author": "Sohee (win/antigravity/gemini-pro-high/clawdbot)",
                 "title": "VIGA Architecture Reference",
+                "source_md": "20260203_VIGA_ARCHITECTURE.md",
                 "summary": "Technical reference: VIGA -> SAM3D -> TRELLIS hierarchy, inference pipeline stages, "
                            "dual decoder architecture, VRAM distribution, and optimization configs.",
                 "key_points": [
@@ -1083,6 +1139,7 @@ DATES = [
             {
                 "type": "analysis",
                 "title": "SAM3D Internals Deep Dive",
+                "source_md": "20260203_SAM3D_INTERNALS.md",
                 "summary": "Technical investigation of SAM3D/TRELLIS pipeline internals. "
                            "4 stages, tunable parameters, and VRAM optimization strategies.",
                 "key_points": [
@@ -1101,6 +1158,7 @@ DATES = [
             {
                 "type": "analysis",
                 "title": "SAM3D Tools Reference",
+                "source_md": "20260203_SAM3D_TOOLS.md",
                 "summary": "CLI tools for the SAM3D workflow: inference, visualization, rendering, and GIF creation.",
                 "key_points": [
                     "sam3d_worker.py: main inference script (image + mask -> GLB)",
@@ -1116,6 +1174,7 @@ DATES = [
                 "type": "summary",
                 "author": "Arin (wsl/claude/opus/clawdbot)",
                 "title": "SAM3D WSL Experience Summary",
+                "source_md": "20260203_SAM3D_WSL_SUMMARY.md",
                 "summary": "Consolidated findings from SAM3D testing on WSL2 Ubuntu.",
                 "key_points": [
                     "Small images (<=1024px) work on RTX 5080 16GB VRAM",
@@ -1143,6 +1202,7 @@ DATES = [
             {
                 "type": "run",
                 "title": "SAM3D WSL Testing (3 Attempts)",
+                "source_md": "20260201_SAM3D_WSL_TESTING.md",
                 "summary": "SAM3D on WSL2 Ubuntu. Three test attempts (original 4480x6720, stage-1-only, 1080p scaled). "
                            "All failed at Stage 3 decode due to OOM on 16GB VRAM.",
                 "input_img": "test_results_images/Image_20260130200053_8_44.png",
@@ -1162,6 +1222,7 @@ DATES = [
             {
                 "type": "summary",
                 "title": "VIGA Progress: SAM3D Environment Setup",
+                "source_md": "20260130_VIGA_PROGRESS.md",
                 "summary": "SAM3D environment setup for RTX 5080 (Blackwell sm_120). Critical dependency discovery.",
                 "key_points": [
                     "RTX 5080 (sm_120 Blackwell) requires Kaolin 0.18.0",
@@ -1190,6 +1251,7 @@ DATES = [
             {
                 "type": "run",
                 "title": "VIGA First Tests (Green Tea + Artist)",
+                "source_md": "20260129_VIGA_PROGRESS.md",
                 "summary": "Initial VIGA tests with GPT-4o. Two scenarios: (1) green tea bottle tipping over, "
                            "(2) Cezanne still life destruction. Established dual-agent iterative workflow.",
                 "input_img": "test_results_images/01_greentea_input.jpg",
@@ -1205,6 +1267,7 @@ DATES = [
                 "type": "analysis",
                 "author": "Sohee (win/antigravity/gemini-pro-high/clawdbot)",
                 "title": "VIGA Workflow Reference",
+                "source_md": "20260129_VIGA_WORKFLOW.md",
                 "summary": "Comprehensive workflow reference: 5 pipeline modes, dual-agent architecture, "
                            "supported VLMs, 3D tools, and project structure.",
                 "key_points": [
@@ -1226,19 +1289,20 @@ DATES = [
 # Main
 # ============================================================================
 
-def _build_pptx():
+def _build_pptx(date_groups, include_intro=True):
     prs = Presentation()
     prs.slide_width = SLIDE_W
     prs.slide_height = SLIDE_H
 
-    # Section 1: Title + Flow + Environment
+    # Intro slides (title + flow + environment)
     make_title_slide(prs)
-    make_flow_slide(prs)
-    make_env_slide(prs)
+    if include_intro:
+        make_flow_slide(prs)
+        make_env_slide(prs)
 
-    # Section 2: Per-date reports (newest to oldest), summaries first per date
+    # Per-date reports (newest to oldest), summaries first per date
     type_order = {"summary": 0, "analysis": 1, "run": 2}
-    for date_group in DATES:
+    for date_group in date_groups:
         date_str = date_group["date"]
         author = date_group["author"]
         entries = sorted(date_group["entries"],
@@ -1254,18 +1318,23 @@ def _build_pptx():
 
 def main():
     global COMPRESS
-
-    # Full quality version (original images, animated GIFs)
     COMPRESS = False
-    prs = _build_pptx()
-    prs.save(str(OUT_FULL))
-    print(f"Saved: {OUT_FULL} ({len(prs.slides)} slides)")
 
-    # Compressed version (downscaled PNGs, animated GIFs kept as-is)
-    COMPRESS = True
-    prs = _build_pptx()
-    prs.save(str(OUT_SMALL))
-    print(f"Saved: {OUT_SMALL} ({len(prs.slides)} slides)")
+    mid = len(DATES) // 2  # Split dates into two halves
+
+    # Part 1: Title + Flow + Env + first half of dates (newest) + closing
+    part1_dates = DATES[:mid]
+    prs1 = _build_pptx(part1_dates, include_intro=True)
+    prs1.save(str(OUT_PART1))
+    date_range1 = f"{part1_dates[-1]['date']} to {part1_dates[0]['date']}"
+    print(f"Saved: {OUT_PART1} ({len(prs1.slides)} slides, {date_range1})")
+
+    # Part 2: Title + second half of dates (oldest) + closing
+    part2_dates = DATES[mid:]
+    prs2 = _build_pptx(part2_dates, include_intro=False)
+    prs2.save(str(OUT_PART2))
+    date_range2 = f"{part2_dates[-1]['date']} to {part2_dates[0]['date']}"
+    print(f"Saved: {OUT_PART2} ({len(prs2.slides)} slides, {date_range2})")
 
 
 if __name__ == "__main__":

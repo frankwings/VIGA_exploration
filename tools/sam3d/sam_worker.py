@@ -27,13 +27,13 @@ from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
 
 
 def panic_filtering_process(raw_masks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Filter and deduplicate SAM masks using greedy selection.
+    """Filter and deduplicate SAM masks using improved selection.
 
     Applies a multi-step filtering process:
     1. Pre-filtering: Remove masks below minimum area threshold
-    2. Sorting: Sort by predicted IoU confidence score
-    3. Greedy filling: Select masks that contribute sufficient new area
-    4. Final selection: Keep top k masks by area
+    2. Sorting: Combination of area and confidence
+    3. Diverse selection: Ensure masks cover different regions
+    4. Final selection: Keep diverse and significant masks
 
     Args:
         raw_masks: List of mask dictionaries, each containing:
@@ -45,8 +45,10 @@ def panic_filtering_process(raw_masks: List[Dict[str, Any]]) -> List[Dict[str, A
         Filtered list of mask dictionaries.
     """
     # Step 1: Pre-filtering
-    # Remove masks that are too small (e.g., text on boxes)
-    min_area_threshold = 100
+    # Adjust minimum area threshold dynamically
+    image_area = raw_masks[0]['segmentation'].size
+    min_area_threshold = max(100, image_area * 0.01)  # At least 1% of image
+    
     candidates = []
     for m in raw_masks:
         if m['area'] > min_area_threshold:
@@ -55,42 +57,39 @@ def panic_filtering_process(raw_masks: List[Dict[str, Any]]) -> List[Dict[str, A
     if len(candidates) == 0:
         return []
 
-    # Step 2: Sort by confidence score
-    # Addresses inappropriate merging by prioritizing high-confidence masks
-    candidates.sort(key=lambda x: x['predicted_iou'], reverse=True)
+    # Step 2: Sort by combined score (area and confidence)
+    candidates.sort(key=lambda x: x['area'] * x['predicted_iou'], reverse=True)
 
-    # Step 3: Greedy filling
-    # Select masks that contribute significant new area
+    # Step 3: Diverse mask selection
     height, width = candidates[0]['segmentation'].shape
     occupancy_mask = np.zeros((height, width), dtype=bool)
 
     final_masks = []
-    MIN_NEW_AREA_RATIO = 0.6
+    MAX_MASKS = 10
+    MIN_UNIQUE_AREA_RATIO = 0.7  # More strict: 70% unique area required
+    MAX_COVERAGE_RATIO = 0.5     # Reject masks covering more than 50% of image
 
     for mask_data in candidates:
         current_seg = mask_data['segmentation']
-        mask_area = mask_data['area']
+        mask_area = np.count_nonzero(current_seg)
+        
+        # Skip masks that are too large (likely background)
+        coverage_ratio = mask_area / (height * width)
+        if coverage_ratio > MAX_COVERAGE_RATIO:
+            continue
 
-        # Calculate overlap with already occupied regions
-        intersection = np.logical_and(current_seg, occupancy_mask)
-        intersection_area = np.count_nonzero(intersection)
+        # Calculate unique area contribution
+        unique_mask = np.logical_and(current_seg, ~occupancy_mask)
+        unique_area_ratio = np.count_nonzero(unique_mask) / mask_area if mask_area > 0 else 0
 
-        # Calculate how many new pixels this mask contributes
-        new_area = mask_area - intersection_area
-
-        # Calculate freshness ratio
-        keep_ratio = new_area / mask_area if mask_area > 0 else 0
-
-        # Decision: keep mask if it contributes enough new area
-        if keep_ratio > MIN_NEW_AREA_RATIO:
+        # Only include mask if it adds significant unique regions
+        if unique_area_ratio > MIN_UNIQUE_AREA_RATIO:
             final_masks.append(mask_data)
-            # Update occupancy map
             occupancy_mask = np.logical_or(occupancy_mask, current_seg)
 
-    # Step 4: Keep only top k masks by area
-    final_masks.sort(key=lambda x: x['area'], reverse=True)
-    k = 15
-    final_masks = final_masks[:k]
+        # Stop if we have enough masks
+        if len(final_masks) >= MAX_MASKS:
+            break
 
     return final_masks
 

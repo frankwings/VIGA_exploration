@@ -117,11 +117,11 @@ class Executor:
             gpu_devices: Optional GPU device IDs.
         """
         self.blender_command = blender_command
-        self.blender_file = blender_file
-        self.blender_script = blender_script
-        self.script_path = Path(script_save)
-        self.render_path = Path(render_save)
-        self.blender_save = blender_save
+        self.blender_file = str(Path(blender_file).resolve())
+        self.blender_script = str(Path(blender_script).resolve())
+        self.script_path = Path(script_save).resolve()
+        self.render_path = Path(render_save).resolve()
+        self.blender_save = str(Path(blender_save).resolve()) if blender_save else blender_save
         self.gpu_devices = gpu_devices
         self.count = 0
 
@@ -142,6 +142,10 @@ class Executor:
         """
         # Use list-based command (no shell=True) for reliable execution
         # Use "NONE" as placeholder for empty render_path (empty string gets dropped on Windows)
+        # Resolve all paths to absolute to avoid issues with Blender's working directory
+        script_path = str(Path(script_path).resolve())
+        if render_path:
+            render_path = str(Path(render_path).resolve())
         cmd = [
             self.blender_command,
             "--background", self.blender_file,
@@ -226,7 +230,7 @@ class Executor:
         code = self._parse_code(code)
         
         # File operations
-        with open(code_file, "w") as f:
+        with open(code_file, "w", encoding="utf-8") as f:
             f.write(code)
         os.makedirs(render_file, exist_ok=True)
         for img in os.listdir(render_file):
@@ -260,7 +264,7 @@ class Executor:
             self.count += 1
             code_file = self.script_path / f"{self.count}.py"
             
-            with open(code_file, "w") as f:
+            with open(code_file, "w", encoding="utf-8") as f:
                 f.write(scene_info_script)
             
             # Execute Blender script

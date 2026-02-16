@@ -168,6 +168,8 @@ def run_dynamic_scene_task(task_config: Dict, args: argparse.Namespace) -> Tuple
         cmd.extend(["--gpu-devices", args.gpu_devices])
     if task_config["target_description"]:
         cmd.extend(["--target-description", task_config["target_description"]])
+    if args.sam3d_results:
+        cmd.extend(["--sam3d-results", args.sam3d_results])
     
     try:
         result = subprocess.run(cmd)  # no timeout
@@ -264,7 +266,8 @@ def main() -> None:
     
     # Additional parameters
     parser.add_argument("--text-only", action="store_true", help="Only use text as reference")
-    parser.add_argument("--prompt-setting", choices=["none", "init"], default="none", help="Setting for the prompt")
+    parser.add_argument("--prompt-setting", choices=["none", "init", "get_asset_sam3d"], default="none", help="Setting for the prompt")
+    parser.add_argument("--sam3d-results", default=None, help="Path to existing SAM3D results dir (skip reconstruction, reuse GLBs + transforms)")
     
     args = parser.parse_args()
     
