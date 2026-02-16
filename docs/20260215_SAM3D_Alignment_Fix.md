@@ -92,7 +92,48 @@ All three fixes committed as `d82b86e`: *"Fix SAM3D vertex transform bugs and ad
 
 ---
 
-## 3. Render Axis Corrections
+## 3. Before vs After Comparison
+
+The broken transforms made objects completely invisible through the MoGe camera — they were placed at wrong positions, entirely outside the camera frustum. The "BEFORE" renders below are blank because no object geometry falls within the camera view.
+
+### Full Scene
+
+![before_after_full_scene](../output/sam3d_rerun_fixed/before_after_full_scene.png)
+
+*Left: Target photograph. Center: Pre-fix render (empty — all objects outside camera). Right: Post-fix render (6 objects correctly placed).*
+
+### Ito En Bottle (best result)
+
+![before_after_bottle](../output/sam3d_rerun_fixed/before_after_bottle.png)
+
+### Alienware Keyboard
+
+![before_after_keyboard](../output/sam3d_rerun_fixed/before_after_keyboard.png)
+
+### Envelope
+
+![before_after_envelope](../output/sam3d_rerun_fixed/before_after_envelope.png)
+
+### Headphones
+
+![before_after_headphones](../output/sam3d_rerun_fixed/before_after_headphones.png)
+
+### Desk Surface
+
+![before_after_desk](../output/sam3d_rerun_fixed/before_after_desk.png)
+
+### Why "BEFORE" Is Blank
+
+The three bugs combined meant:
+1. **Translation lost** (Bug 1) — objects placed at origin instead of their MoGe-estimated 3D positions
+2. **X-axis mirrored** (Bug 2) — coordinates negated on one axis
+3. The resulting vertex positions fell entirely outside the MoGe camera frustum, producing empty renders
+
+This confirms the fix was necessary and effective: the same TRELLIS reconstructions, re-run with correct transforms, produce properly aligned 3D renders.
+
+---
+
+## 4. Render Axis Corrections
 
 After fixing the transform bugs, two additional axis mismatches were discovered during rendering:
 
@@ -137,7 +178,7 @@ Committed as `c1688b8`: *"Fix horizontal mirror: PyTorch3D X-left vs OpenCV X-ri
 
 ---
 
-## 4. Coordinate System Reference
+## 5. Coordinate System Reference
 
 The full transform chain from MoGe pointmap to final rendered pixel:
 
@@ -167,7 +208,7 @@ Key conventions:
 
 ---
 
-## 5. Re-Run Results
+## 6. Re-Run Results
 
 ### TRELLIS Reconstruction (6 of 6 objects)
 
@@ -209,7 +250,7 @@ Note: Translations are in PyTorch3D camera space (X-left, Y-up, Z-forward). The 
 
 ---
 
-## 6. Per-Object Alignment Results
+## 7. Per-Object Alignment Results
 
 ### green_tea_bottle_1 (Ito En Bottle) — Best Result
 
@@ -261,7 +302,7 @@ Note: Translations are in PyTorch3D camera space (X-left, Y-up, Z-forward). The 
 
 ---
 
-## 7. Full Scene Comparison
+## 8. Full Scene Comparison
 
 ![full_scene_comparison](../output/sam3d_rerun_fixed/full_scene_comparison_6obj.png)
 
@@ -272,7 +313,7 @@ The overall spatial layout matches: bottle in the foreground center, keyboard be
 
 ---
 
-## 8. Files Created / Modified
+## 9. Files Created / Modified
 
 ### Modified
 
@@ -307,7 +348,7 @@ output/sam3d_rerun_fixed/
 
 ---
 
-## 9. Per-Object Pixel Accuracy Analysis
+## 10. Per-Object Pixel Accuracy Analysis
 
 To quantify remaining alignment errors, we measured the bounding-box center offset between each 2D segmented input and its corresponding 3D render (both at 771x1024 resolution).
 
@@ -335,7 +376,7 @@ To quantify remaining alignment errors, we measured the bounding-box center offs
 
 ---
 
-## 10. Git History
+## 11. Git History
 
 | Commit | Message |
 |---|---|
@@ -347,7 +388,7 @@ To quantify remaining alignment errors, we measured the bounding-box center offs
 
 ---
 
-## 11. Known Issues & Next Steps
+## 12. Known Issues & Next Steps
 
 1. ~~**Headphones failed**~~ — **Resolved.** Successfully reconstructed on 2nd attempt (solo run, ~24 min total). Decode took ~19 min for 24K sparse coords.
 2. **Mesh is mirrored in 3D** — The horizontal flip is currently applied at render time. For correct GLB files, the X-axis negation should be applied in `sam3d_worker.py` (with face winding correction) so GLBs are correct in any viewer.
