@@ -186,6 +186,7 @@ def grow_mask_to_convex_hull(
     sobel_mag: np.ndarray,
     edge_sigma: float = 2.0,
     max_iters: int = 50,
+    exclude_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     """Grow mask toward convex hull, stopping at depth edges.
 
@@ -199,6 +200,7 @@ def grow_mask_to_convex_hull(
         sobel_mag: Sobel gradient magnitude of depth (H, W)
         edge_sigma: Number of std deviations above median to set the threshold
         max_iters: Maximum dilation iterations
+        exclude_mask: Binary mask of pixels to never grow into (other objects)
 
     Returns:
         grown_mask: Expanded binary mask (H, W)
@@ -215,6 +217,10 @@ def grow_mask_to_convex_hull(
 
     # Region we're allowed to grow into: inside hull but not original mask
     growth_region = hull_mask & ~mask_bool
+
+    # Exclude other objects' masks from growth region
+    if exclude_mask is not None:
+        growth_region = growth_region & ~exclude_mask
 
     # Pixels in the growth region that are NOT depth edges
     safe_pixels = growth_region & (sobel_mag < threshold)
@@ -402,6 +408,72 @@ def run_icp_alignment(
         "transformation_cv": T_cv.tolist(),
     }
     return verts_aligned, info
+
+
+# ---------------------------------------------------------------------------
+# Post-ICP depth-scale correction
+# ---------------------------------------------------------------------------
+
+def compute_depth_scale(
+    verts_pt3d: np.ndarray,
+    mask_bool: np.ndarray,
+    depth: np.ndarray,
+    fx: float, fy: float, cx: float, cy: float,
+    H: int, W: int,
+) -> tuple[float, dict]:
+    """Compute optimal uniform scale to correct depth.
+
+    Scaling from the camera origin preserves 2D projection exactly
+    (s cancels in X/Z and Y/Z ratios), so this only affects depth.
+
+    Args:
+        verts_pt3d: (N, 3) vertices in PT3D camera space
+        mask_bool: (H, W) original object mask (not grown)
+        depth: (H, W) MoGe depth map
+        fx, fy, cx, cy: Camera intrinsics
+        H, W: Image dimensions
+
+    Returns:
+        s: Optimal scale factor
+        info: Dict with statistics
+    """
+    verts_cv = pt3d_to_opencv(verts_pt3d)
+    uv, z_v = project(verts_cv, fx, fy, cx, cy)
+
+    u_int = np.round(uv[:, 0]).astype(np.int32)
+    v_int = np.round(uv[:, 1]).astype(np.int32)
+
+    in_bounds = (u_int >= 0) & (u_int < W) & (v_int >= 0) & (v_int < H) & (z_v > 0)
+    in_mask = np.zeros(len(verts_pt3d), dtype=bool)
+    in_mask[in_bounds] = mask_bool[v_int[in_bounds], u_int[in_bounds]]
+
+    valid = in_bounds & in_mask
+    if valid.sum() < 10:
+        return 1.0, {"valid_count": int(valid.sum()), "scale": 1.0, "reason": "too_few_points"}
+
+    z_vertex = z_v[valid]
+    z_moge = depth[v_int[valid], u_int[valid]]
+
+    # Robust scale: median of per-vertex ratios (filters outliers)
+    ratios = z_moge / np.maximum(z_vertex, 1e-6)
+    s = float(np.median(ratios))
+
+    # Clamp to reasonable range to avoid pathological cases
+    s = np.clip(s, 0.5, 2.0)
+
+    info = {
+        "valid_count": int(valid.sum()),
+        "scale": s,
+        "ratio_std": float(np.std(ratios)),
+        "ratio_q25": float(np.percentile(ratios, 25)),
+        "ratio_q75": float(np.percentile(ratios, 75)),
+    }
+    return s, info
+
+
+def apply_depth_scale(verts_pt3d: np.ndarray, s: float) -> np.ndarray:
+    """Scale vertices from camera origin. Preserves 2D projection, corrects depth."""
+    return (verts_pt3d * s).astype(np.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -723,6 +795,17 @@ def main():
     print(f"Edge sigma: {args.edge_sigma}")
     print()
 
+    # --- Pre-load ALL masks for exclusion ---
+    all_masks = {}
+    for obj in objects:
+        name = obj["object_name"]
+        mask_path = data_dir / f"{name}.npy"
+        if mask_path.exists():
+            m = np.load(str(mask_path))
+            all_masks[name] = m > 127
+        else:
+            all_masks[name] = np.ones((H, W), dtype=bool)
+
     new_transforms = []
     stats_before_all = {}
     stats_after_all = {}
@@ -745,10 +828,13 @@ def main():
 
         # Load data
         verts = load_glb_vertices(glb_path)
-        mask = np.load(str(mask_path)) if mask_path.exists() else np.ones((H, W), dtype=np.uint8) * 255
-        mask_bool = mask > 127
+        mask_bool = all_masks[name]
 
-        centroid = np.array(obj["translation"], dtype=np.float32)
+        # Build exclusion mask: union of ALL other objects' masks
+        exclude_mask = np.zeros((H, W), dtype=bool)
+        for other_name, other_mask in all_masks.items():
+            if other_name != name:
+                exclude_mask |= other_mask
 
         # --- Before stats ---
         stats_b = compute_masked_depth_error(verts, mask_bool, depth, fx, fy, cx, cy, H, W)
@@ -760,10 +846,11 @@ def main():
               f"ratio={stats_b.get('scale_ratio', 0):.4f}  "
               f"valid={stats_b.get('valid_count', 0)}")
 
-        # --- Grow mask toward convex hull ---
+        # --- Grow mask toward convex hull (with other-object exclusion) ---
         hull_mask = make_convex_hull_mask(mask_bool)
         grown_mask = grow_mask_to_convex_hull(
             mask_bool, depth, sobel_mag, edge_sigma=args.edge_sigma,
+            exclude_mask=exclude_mask,
         )
 
         # Compute threshold for visualization
@@ -776,8 +863,9 @@ def main():
         n_orig = int(mask_bool.sum())
         n_grown = int(grown_mask.sum())
         n_hull = int(hull_mask.sum())
+        n_excluded = int(exclude_mask.sum())
         print(f"  Mask: original={n_orig:,}  hull={n_hull:,}  grown={n_grown:,}  "
-              f"(+{n_grown - n_orig:,} pixels, edge_thresh={edge_threshold:.4f})")
+              f"(+{n_grown - n_orig:,} pixels, excluded={n_excluded:,})")
 
         # --- Visualize mask growth ---
         vis_path = output_dir / f"{name}_mask_growth.png"
@@ -792,39 +880,65 @@ def main():
             verts, pointmap, grown_mask,
             icp_threshold=args.icp_threshold,
         )
-        verts_after_all[name] = verts_aligned.copy()
 
         print(f"  ICP: fitness={icp_info['fitness']:.4f}  "
               f"rmse={icp_info['rmse']:.4f}  "
               f"target_pts={icp_info['n_target']:,}  "
               f"source_pts={icp_info['n_source']:,}")
 
-        # --- After stats ---
-        stats_a = compute_masked_depth_error(verts_aligned, mask_bool, depth, fx, fy, cx, cy, H, W)
+        # --- Post-ICP depth-scale correction ---
+        # Scale from camera origin: preserves 2D projection, corrects depth
+        s, scale_info = compute_depth_scale(
+            verts_aligned, mask_bool, depth, fx, fy, cx, cy, H, W,
+        )
+        verts_scaled = apply_depth_scale(verts_aligned, s)
+        print(f"  Scale: s={s:.4f}  ({scale_info['valid_count']} pts, "
+              f"ratio_std={scale_info.get('ratio_std', 0):.4f})")
 
-        improvement = (stats_b.get("depth_error_rel_mean", 0) - stats_a.get("depth_error_rel_mean", 0))
-        symbol = "+" if improvement > 0 else ""
+        # --- After stats (post ICP + scale) ---
+        stats_a = compute_masked_depth_error(verts_scaled, mask_bool, depth, fx, fy, cx, cy, H, W)
 
-        print(f"  AFTER:  rel_err={stats_a.get('depth_error_rel_mean', 0):.2%}  "
-              f"|err|={stats_a.get('depth_error_abs_mean', 0):.4f}  "
-              f"ratio={stats_a.get('scale_ratio', 0):.4f}  "
-              f"({symbol}{improvement:.2%} improvement)")
+        # --- Rejection gate: keep original if error increased ---
+        err_before = stats_b.get("depth_error_rel_mean", float("inf"))
+        err_after = stats_a.get("depth_error_rel_mean", float("inf"))
 
-        verts_after_all[name] = verts_aligned.copy()
-        stats_after_all[name] = stats_a
+        if err_after < err_before:
+            verts_final = verts_scaled
+            stats_final = stats_a
+            accepted = True
+            improvement = err_before - err_after
+            print(f"  AFTER:  rel_err={err_after:.2%}  "
+                  f"|err|={stats_a.get('depth_error_abs_mean', 0):.4f}  "
+                  f"ratio={stats_a.get('scale_ratio', 0):.4f}  "
+                  f"(+{improvement:.2%} improvement) [ACCEPTED]")
+        else:
+            verts_final = verts.copy()
+            stats_final = stats_b
+            accepted = False
+            print(f"  AFTER:  rel_err={err_after:.2%} (worse than {err_before:.2%})  "
+                  f"[REJECTED, keeping original]")
 
-        # --- Save corrected GLB ---
-        scene = load_glb_scene(glb_path)
-        T_icp = np.array(icp_info["transformation"], dtype=np.float64)
-        for geom in scene.geometry.values():
-            if hasattr(geom, "vertices"):
-                v = np.asarray(geom.vertices, dtype=np.float64)
-                ones = np.ones((len(v), 1), dtype=np.float64)
-                v_h = np.hstack([v, ones])
-                v_aligned = (v_h @ T_icp.T)[:, :3]
-                geom.vertices = v_aligned.astype(np.float32)
-        out_glb = output_dir / f"{name}.glb"
-        scene.export(str(out_glb))
+        verts_after_all[name] = verts_final.copy()
+        stats_after_all[name] = stats_final
+
+        # --- Save GLB (corrected or original) ---
+        if accepted:
+            scene = load_glb_scene(glb_path)
+            T_icp = np.array(icp_info["transformation"], dtype=np.float64)
+            for geom in scene.geometry.values():
+                if hasattr(geom, "vertices"):
+                    v = np.asarray(geom.vertices, dtype=np.float64)
+                    ones = np.ones((len(v), 1), dtype=np.float64)
+                    v_h = np.hstack([v, ones])
+                    v_aligned = (v_h @ T_icp.T)[:, :3]
+                    # Apply depth-scale correction
+                    v_aligned = v_aligned * s
+                    geom.vertices = v_aligned.astype(np.float32)
+            out_glb = output_dir / f"{name}.glb"
+            scene.export(str(out_glb))
+        else:
+            out_glb = output_dir / f"{name}.glb"
+            shutil.copy2(glb_path, out_glb)
 
         # Copy mask and PNG
         if mask_path.exists():
@@ -841,24 +955,27 @@ def main():
             "pointmap_shape": obj.get("pointmap_shape", [H, W, 3]),
             "object_name": name,
             "icp_transformation": icp_info["transformation"],
+            "depth_scale": s,
+            "accepted": accepted,
         }
         new_transforms.append(new_transform)
 
-        info = {**new_transform, "icp_info": icp_info}
+        info = {**new_transform, "icp_info": icp_info, "scale_info": scale_info}
         with open(output_dir / f"{name}_info.json", "w", encoding="utf-8") as f:
             json.dump(info, f, indent=2)
 
         # --- Per-object comparison image ---
+        mask_raw = np.load(str(mask_path)) if mask_path.exists() else np.ones((H, W), dtype=np.uint8) * 255
         compare_path = output_dir / f"{name}_compare.png"
         make_comparison_image(
             png_path if png_path.exists() else None,
-            mask, verts, verts_aligned, depth, fx, fy, cx, cy, H, W,
-            name, stats_b, stats_a, compare_path,
+            mask_raw, verts, verts_final, depth, fx, fy, cx, cy, H, W,
+            name, stats_b, stats_final, compare_path,
         )
         print(f"  Saved: {compare_path.name}")
 
         # --- Per-object render (after only) ---
-        render_img = render_projected_vertices(verts_aligned, fx, fy, cx, cy, H, W, depth)
+        render_img = render_projected_vertices(verts_final, fx, fy, cx, cy, H, W, depth)
         if Image:
             Image.fromarray(render_img).save(str(output_dir / f"{name}_render.png"))
 
@@ -898,13 +1015,21 @@ def main():
     print("=" * 60)
     print("SUMMARY")
     print("=" * 60)
-    print(f"{'Object':35s}  {'Before':>8s}  {'After':>8s}  {'Change':>8s}")
-    print("-" * 65)
+    print(f"{'Object':35s}  {'Before':>8s}  {'After':>8s}  {'Change':>8s}  {'Status':>8s}")
+    print("-" * 80)
+    total_improved = 0
     for name in stats_before_all:
         b = stats_before_all[name].get("depth_error_rel_mean", 0) * 100
         a = stats_after_all.get(name, {}).get("depth_error_rel_mean", 0) * 100
         delta = b - a
-        print(f"  {name:33s}  {b:7.1f}%  {a:7.1f}%  {delta:+7.1f}pp")
+        # Check if this object was accepted by finding its transform
+        obj_accepted = any(t.get("object_name") == name and t.get("accepted", True)
+                         for t in new_transforms)
+        status = "OK" if obj_accepted and delta > 0 else ("KEPT" if not obj_accepted or delta <= 0 else "OK")
+        if delta > 0:
+            total_improved += 1
+        print(f"  {name:33s}  {b:7.1f}%  {a:7.1f}%  {delta:+7.1f}pp  {status:>8s}")
+    print(f"\n  Improved: {total_improved}/{len(stats_before_all)} objects")
 
     print(f"\nResults saved to: {output_dir}")
 
