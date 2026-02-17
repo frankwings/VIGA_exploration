@@ -82,12 +82,39 @@ MoGe also estimates camera intrinsics (focal length, principal point) from the i
 - `intrinsics_px` -- (3, 3) camera intrinsic matrix in pixel coordinates
 - `depth` -- (H, W) depth map (the Z channel of the pointmap)
 
-**How it is called internally** (in `inference_pipeline_pointmap.py`):
+### How MoGe is called
+
+**MoGe wrapper** (`depth_models/moge.py:5-10`):
 
 ```python
-output = self.depth_model(loaded_image)   # depth_model = MoGe
-pointmaps = output["pointmaps"]           # (H, W, 3)
+output = self.model.infer(image.to(self.device), force_projection=False)
+pointmaps = output["points"]
 ```
+
+**Pipeline call** (`inference_pipeline_pointmap.py:248-259`):
+
+```python
+output = self.depth_model(loaded_image)       # depth_model = MoGe
+pointmaps = output["pointmaps"]               # (H, W, 3) in MoGe camera space
+# Transform from MoGe camera space to PyTorch3D camera space
+camera_convention_transform = Transform3d().rotate(
+    camera_to_pytorch3d_camera(device=self.device).rotation
+)
+points_tensor = camera_convention_transform.transform_points(pointmaps)
+intrinsics = output.get("intrinsics", None)
+```
+
+**Camera intrinsics inference** -- if MoGe doesn't provide intrinsics directly, they are recovered from the pointmap geometry (`pipeline/utils/pointmap.py:21-108`):
+
+```python
+# Recovers focal length and shift from the pointmap structure
+shift, focal = recover_focal_shift(points, mask_binary)   # line 78
+fx = focal / 2 * (1 + aspect_ratio ** 2) ** 0.5 / aspect_ratio
+fy = focal / 2 * (1 + aspect_ratio ** 2) ** 0.5
+intrinsics = utils3d.torch.intrinsics_from_focal_center(fx, fy, 0.5, 0.5)
+```
+
+There is **no separate camera pose estimation**. The camera is implicitly at the origin. MoGe outputs a pointmap directly in camera space.
 
 MoGe is called once for the full scene image. The pointmap is then used in Steps 4 and 5 for pose estimation and alignment.
 
@@ -107,10 +134,9 @@ For **each** object mask:
 
 **TRELLIS takes only an RGBA image** (RGB + alpha mask from segmentation). It does **NOT** receive the MoGe depth/pointmap for shape reconstruction.
 
-The nuance: the MoGe pointmap is passed to the **sparse structure generator** (Stage 1) as conditioning to help with **pose prediction**, but the actual **shape reconstruction** (SLAT / Stage 2) uses only the image:
+The nuance: the MoGe pointmap is passed to the **sparse structure generator** (Stage 1) as conditioning to help with **pose prediction**, but the actual **shape reconstruction** (SLAT / Stage 2) uses only the image (`inference_pipeline_pointmap.py:344-348`):
 
 ```python
-# From inference_pipeline_pointmap.py:
 ss_input_dict = self.preprocess_image(
     image, self.ss_preprocessor, pointmap=pointmap   # Stage 1: gets pointmap
 )
@@ -123,11 +149,11 @@ This means the 3D mesh shape comes purely from the image appearance. The pointma
 
 ### TRELLIS internal stages
 
-| Stage | Name | Solver | Steps | Input | Output |
-|-------|------|--------|-------|-------|--------|
-| 1 | Sparse Structure | ShortCut | 2 | Image + pointmap | Shape latent + pose heads (rotation, translation, scale) |
-| 2 | Sparse Latent (SLAT) | Euler | 12 | Image only (NO pointmap) | Detailed shape latent |
-| 3 | Dual Decode | -- | -- | Shape latent | 3D Gaussians (32/voxel, 64^3) -> mesh (~300K vertices) |
+| Stage | Name | Code | Solver | Steps | Input | Output |
+| ----- | ---- | ---- | ------ | ----- | ----- | ------ |
+| 1 | Sparse Structure | `inference_pipeline.py:644-721` | ShortCut | 2 | Image + pointmap | Shape latent + pose heads (rotation, translation, scale) |
+| 2 | Sparse Latent (SLAT) | `inference_pipeline.py:723-770` | Euler | 12 | Image only (NO pointmap) | Detailed shape latent |
+| 3 | Dual Decode | `inference_pipeline.py:591-617` | -- | -- | Shape latent | 3D Gaussians (32/voxel, 64^3) -> mesh (~300K vertices) |
 
 **Input:** RGBA image (per object)
 **Output:** Mesh in TRELLIS model space (Z-up, ~[-0.5, 0.5] range)
@@ -140,37 +166,55 @@ This means the 3D mesh shape comes purely from the image appearance. The pointma
 
 **Conda env:** `sam3d_py311`
 **Component:** Deterministic math function (NOT a separate neural network)
-**Code:** `utils/third_party/sam3d/sam3d_objects/pipeline/inference_utils.py` (function `pose_decoder`)
+**Code:** `inference_utils.py:224-327` (function `pose_decoder`)
 
 ### What is the pose decoder?
 
-The "pose decoder" is **not a neural network** -- it is a pure Python function (a closure) that performs deterministic mathematical conversion. The actual pose **prediction** happens inside the sparse structure generator from Step 3 (Stage 1), which is an MM-DiT (Multi-Modal Diffusion Transformer) with **multiple output heads** that jointly predict:
+The "pose decoder" is **not a neural network** -- it is a pure Python function (a closure returned by `pose_decoder()` at `inference_utils.py:224`) that performs deterministic mathematical conversion. The actual pose **prediction** happens inside the sparse structure generator from Step 3 (Stage 1), which is an MM-DiT (Multi-Modal Diffusion Transformer) with **multiple output heads** that jointly predict:
 
 - Shape latent
 - 6D rotation (continuous rotation representation)
 - Translation (in log-space)
 - Scale (in log-space)
 
-The pose decoder merely converts these raw network outputs into usable parameters:
+The pose decoder merely converts these raw network outputs into usable parameters.
+
+### How it is called
+
+In the main pipeline (`inference_pipeline_pointmap.py:358-366`):
+
+```python
+pointmap_scale = ss_input_dict.get("pointmap_scale", None)
+pointmap_shift = ss_input_dict.get("pointmap_shift", None)
+ss_return_dict.update(
+    self.pose_decoder(
+        ss_return_dict,
+        scene_scale=pointmap_scale,
+        scene_shift=pointmap_shift,
+    )
+)
+```
 
 ### Conversion steps
 
-1. **Remap keys:** Raw output keys (`"6drotation_normalized"`, `"translation"`, `"scale"`) are renamed to internal convention
-2. **Denormalize rotation:** 6D rotation is un-standardized using pre-computed `ROTATION_6D_MEAN` and `ROTATION_6D_STD`
-3. **6D -> quaternion:** Gram-Schmidt orthogonalization converts 6D rotation to a 3x3 rotation matrix, then to quaternion (wxyz)
-4. **Exponentiate:** Scale and translation are predicted in log-space; `torch.exp()` converts them to real values
-5. **Undo MoGe normalization:** The MoGe pointmap is normalized by `scene_scale` and `scene_shift` during preprocessing. The pose decoder reverses this to get camera-space values:
+1. **Remap keys** (`inference_utils.py:231-244`): Raw output keys (`"6drotation_normalized"`, `"translation"`, `"scale"`) are renamed to internal convention
+2. **Denormalize rotation** (`inference_utils.py:253-260`): 6D rotation is un-standardized using pre-computed `ROTATION_6D_MEAN` and `ROTATION_6D_STD` (lines 49-67)
+3. **6D -> quaternion** (`inference_utils.py:261-281`): Gram-Schmidt orthogonalization converts 6D rotation to a 3x3 rotation matrix, then to quaternion (wxyz)
+4. **Exponentiate** (`inference_utils.py:283-291`): Scale and translation are predicted in log-space; `torch.exp()` converts them to real values
+5. **Undo MoGe normalization** via `PoseTargetConverter.dicts_pose_target_to_instance_pose()` (`inference_utils.py:310-325`): The MoGe pointmap is normalized by `scene_scale` and `scene_shift` during preprocessing (`pose_target.py:361-372`):
+
    ```python
-   # MoGe preprocessing:
+   # ScaleShiftInvariant.get_scale_and_shift (pose_target.py:361):
    shift_z = pointmap[..., -1].nanmedian()
    scale = (pointmap - shift).abs().nanmean()
-
-   # Pose decoder undoes this normalization to recover camera-space pose
    ```
-6. **Pose target convention:** Applies the training convention (e.g., `ScaleShiftInvariant`) to produce the final instance pose
+
+   The `ScaleShiftInvariant.to_instance_pose()` (`pose_target.py:325-348`) reverses this normalization via `ssi_to_metric()` (`pose_target.py:374-380`) which composes `Transform3d().scale(scale).translate(shift)` to recover camera-space values.
+
+6. **Pose target convention** (`pose_target.py:283-381`): Applies the `ScaleShiftInvariant` training convention to produce the final instance pose
 
 **Input:** Raw network outputs from sparse structure generator + MoGe scale/shift
-**Output:** Per-object quaternion (wxyz), translation (3D), scale (uniform)
+**Output:** Per-object quaternion (wxyz), translation (3D), scale (3D)
 
 ---
 
@@ -178,32 +222,54 @@ The pose decoder merely converts these raw network outputs into usable parameter
 
 **Conda env:** `sam3d_py311`
 **Component:** Part of **Meta's original SAM3D code** (NOT something we added)
-**Code:** `utils/third_party/sam3d/sam3d_objects/pipeline/layout_post_optimization_utils.py`
+**Orchestrator:** `inference_utils.py:70-221` (function `layout_post_optimization`)
+**Implementation:** `layout_post_optimization_utils.py` (alignment, ICP, differentiable rendering)
 
 This is a **3-stage refinement** that adjusts each object's pose to better match the scene. The code has `Copyright (c) Meta Platforms, Inc. and affiliates` headers and was present in the initial commit of the SAM3D third-party code.
 
+**Pipeline call** (`inference_pipeline_pointmap.py:396-413`):
+
+```python
+if with_layout_postprocess and self.layout_post_optimization_method is not None:
+    postprocessed_pose = self.run_post_optimization(
+        deepcopy(glb), pointmap_dict["intrinsics"], ss_return_dict, ss_input_dict,
+    )
+    ss_return_dict.update(postprocessed_pose)
+```
+
+**Occlusion check** (`inference_utils.py:98-106`): Before any optimization, `check_occlusion()` (`layout_post_optimization_utils.py:93-111`) tests if the mask touches the image border, is occluded by other objects (via depth comparison), or has internal holes. If any check triggers, the entire post-optimization is **skipped** and the raw Step 4 pose is returned.
+
 ### Stage 5a: Manual Alignment
+
+**Code:** `layout_post_optimization_utils.py:167-222` (function `run_alignment`)
+**Called at:** `inference_utils.py:109-113`
 
 Aligns the mesh to the MoGe pointmap within the object's mask:
 
-1. **Extract target points:** Get 3D points from the MoGe pointmap **within the object mask only** (not the full image). Apply outlier filtering at the 90th depth percentile:
+1. **Extract target points** (lines 180-189): Get 3D points from the MoGe pointmap **within the object mask only** (not the full image). Apply outlier filtering at the 90th depth percentile:
+
    ```python
    target_object_points = Point_Map[mask[0, 0].bool()]
    depth_quantile = torch.quantile(target_object_points[:, 2], 0.9)
    target_object_points = target_object_points[target_object_points[:, 2] <= depth_quantile]
    ```
-2. **Scale matching:** Scale the mesh to match the height (Y-extent) of the target point cloud
-3. **Centroid alignment:** Translate the mesh centroid to match the target point cloud centroid
-4. **Quality check:** Compute silhouette IoU as a sanity check
 
-**Space:** 3D camera space
+2. **Scale matching** (lines 196-202): Scale the mesh to match the height (Y-extent) of the target point cloud
+3. **Centroid alignment** (lines 204-209): Translate the mesh centroid to match the target point cloud centroid
+4. **Quality check** (line 219): Compute silhouette IoU via `compute_iou()` (line 329)
+
+**Space:** 3D camera space (PyTorch3D convention: X-left, Y-up, Z-forward)
 **Target:** Masked MoGe pointmap (only pixels within the object mask, with depth outlier filtering)
 
 ### Stage 5b: ICP (Iterative Closest Point)
 
+**Code:** `layout_post_optimization_utils.py:383-403` (function `run_ICP`)
+**Called at:** `inference_utils.py:127-165`
+
 **What is ICP?** An iterative algorithm that finds the rigid transformation (rotation + translation) that best aligns two 3D point clouds. At each iteration, it finds the closest point in the target for each source point, then computes the transformation that minimizes the sum of squared distances.
 
-**Implementation:** Open3D `registration_icp` with `TransformationEstimationPointToPoint`:
+**Implementation** (`layout_post_optimization_utils.py:390-397`): Open3D `registration_icp` with `TransformationEstimationPointToPoint`:
+
 ```python
 reg_p2p = o3d.pipelines.registration.registration_icp(
     src_pcd, tgt_pcd, threshold=0.05, trans_init=np.eye(4),
@@ -216,9 +282,12 @@ reg_p2p = o3d.pipelines.registration.registration_icp(
 - **Source:** Mesh vertices (from TRELLIS, after Stage 5a alignment)
 - **Target:** MoGe pointmap points **within the object mask only** (masked region, with depth outlier filtering from Stage 5a)
 - **Threshold:** 0.05 camera-space units -- point pairs farther apart than this are ignored
-- **Accepted only if** the resulting silhouette IoU improves compared to pre-ICP state; otherwise the ICP result is discarded
+- **Acceptance** (`inference_utils.py:140`): Accepted **only if** the resulting silhouette IoU improves (`ori_iou_shapeICP > ori_iou`); otherwise the ICP result is discarded (lines 156-165)
 
 ### Stage 5c: Differentiable Rendering Optimization
+
+**Code:** `layout_post_optimization_utils.py:406-445` (function `run_render_compare`)
+**Called at:** `inference_utils.py:175-205`
 
 **What is differentiable rendering?** A rendering technique where the entire render pipeline is implemented with differentiable operations, so gradients can flow backward from a 2D image loss through the renderer to 3D parameters. This allows optimizing 3D pose parameters (rotation, translation, scale) by:
 1. Rendering the mesh from the current pose
@@ -228,7 +297,8 @@ reg_p2p = o3d.pipelines.registration.registration_icp(
 
 This is **part of Meta's original SAM3D code** -- it was NOT added by us. It is the final refinement stage in the original pipeline.
 
-**Renderer:** PyTorch3D `MeshRenderer` with `SoftSilhouetteShader`:
+**Renderer** (`layout_post_optimization_utils.py:152-164`, function `get_mask_renderer`): PyTorch3D `MeshRenderer` with `SoftSilhouetteShader`:
+
 ```python
 renderer = MeshRenderer(
     rasterizer=MeshRasterizer(cameras=cameras, raster_settings=raster_settings),
@@ -238,21 +308,22 @@ renderer = MeshRenderer(
 
 **What it renders:** A **soft silhouette ONLY** (alpha channel). It does **NOT** render depth or color. The `SoftSilhouetteShader` produces a smooth, differentiable approximation of the object silhouette -- a grayscale image where pixels are 1 inside the object and 0 outside, with soft edges that allow gradient flow.
 
-**Camera setup:** Uses the MoGe-estimated intrinsics (focal length, principal point) with PyTorch3D's `PerspectiveCameras`.
+**Camera setup** (`layout_post_optimization_utils.py:141-151`): Uses the MoGe-estimated intrinsics (focal length, principal point) with PyTorch3D's `PerspectiveCameras`.
 
-**Parameters optimized:**
+**Parameters optimized** (`layout_post_optimization_utils.py:408-414`):
 - Quaternion (rotation) -- 4 values, wxyz
 - Translation (3D) -- 3 values
 - Scale (uniform) -- 1 value
 
-**Two-stage optimization:**
+**Two-stage optimization** (`layout_post_optimization_utils.py:416-440`):
 
 | Stage | Iterations | Learning Rate | Parameters | Why |
-|-------|-----------|---------------|------------|-----|
+| ----- | ---------- | ------------- | ---------- | --- |
 | 1 | 5 | 1e-2 | Translation + Scale only | Coarse positioning first |
 | 2 | 25 | 5e-3 | Quaternion + Translation + Scale | Fine-tune with rotation |
 
-**Loss function:**
+**Loss function** (`layout_post_optimization_utils.py:243-265`, function `compute_loss`):
+
 ```
 L = 200   * MSE(rendered_silhouette, gt_mask)     # silhouette alignment
   + 0.1   * MSE(quaternion, identity_quaternion)   # rotation regularization
@@ -262,25 +333,26 @@ L = 200   * MSE(rendered_silhouette, gt_mask)     # silhouette alignment
 
 The silhouette term has weight 200, dominating the loss. The regularization terms prevent the optimizer from drifting too far from the initial pose.
 
-**Acceptance criteria:** The optimized result is accepted only if:
+**Acceptance criteria** (`inference_utils.py:190-193`): The optimized result is accepted only if:
 - Final IoU > 0.5 (minimum quality threshold)
 - Final IoU > pre-optimization IoU (must actually improve)
 
-If either condition fails, the optimization result is discarded and the pre-optimization pose is kept.
+If either condition fails, **the entire post-optimization is rejected** -- not just Stage 5c, but also Stages 5a and 5b. The code reverts to the raw Step 4 pose (`tfm = tfm_ori`, line 192). There is a commented-out alternative (line 193) that would keep Stages 5a+5b while rejecting only 5c, but it is not active.
 
 ### Critical Limitation of Step 5
 
 **The entire layout post-optimization (all 3 stages) only optimizes for 2D silhouette alignment. There is NO depth loss term anywhere in the pipeline.**
 
 - Stage 5a aligns centroids in 3D (which includes depth), but doesn't minimize depth error
-- Stage 5b ICP aligns in 3D, but acceptance is judged by 2D silhouette IoU
-- Stage 5c explicitly optimizes silhouette MSE only
+- Stage 5b ICP aligns in 3D, but acceptance is judged by 2D silhouette IoU (`inference_utils.py:140`)
+- Stage 5c explicitly optimizes silhouette MSE only (`layout_post_optimization_utils.py:247`)
 
 This means objects can achieve good 2D alignment (high mask IoU) while having incorrect depth placement. This is the **root cause** of the depth alignment issues we diagnosed in `20260216_Depth_Alignment_Analysis.md`:
 - Sofa: 96% mask coverage but 51% depth error
 - Chair legs: 94% mask coverage but 55% depth error
 
 A depth loss term in Step 5c would directly fix this:
+
 ```python
 # Proposed fix: add depth loss to the differentiable rendering loop
 depth_loss = L1(projected_vertex_z, moge_depth_at_projected_pixels)
@@ -291,21 +363,34 @@ total_loss = 200 * silhouette_loss + lambda_depth * depth_loss + regularization
 
 ## Step 6: Export
 
-**Code:** `tools/sam3d/sam3d_worker.py` (function `transform_mesh_vertices`)
+**Code:** `tools/sam3d/sam3d_worker.py`
+**Transform function:** `transform_mesh_vertices` (lines 113-152)
+**Main export logic:** `main()` (lines 155-217)
 
-1. **Coordinate conversion:** Apply Z-up to Y-up rotation to TRELLIS mesh vertices:
+1. **Coordinate conversion** (lines 104-110, 142): Apply Z-up to Y-up rotation to TRELLIS mesh vertices. This matches `layout_post_optimization_utils.get_mesh()` line 116:
+
    ```python
-   mesh_vertices @ [[1, 0, 0],
-                    [0, 0, -1],
-                    [0, 1, 0]].T
+   # R_zup_to_yup (sam3d_worker.py:108-110):
+   R_zup_to_yup = torch.tensor([[1, 0, 0], [0, 0, 1], [0, -1, 0]])
+   vertices = vertices @ R_zup_to_yup   # line 142
    ```
-2. **Bake transforms:** Apply the final S, R, T into vertex positions (PyTorch3D camera space). After this, the GLB file contains vertices already in camera space -- no additional transforms needed at render time.
-3. **Export:** Save as `.glb` per object (trimesh)
-4. **Save metadata:**
-   - `object_transforms.json` -- all objects' translation, rotation (wxyz quaternion), scale
-   - `{name}_info.json` -- per-object transform details
-   - `target_moge.npz` -- MoGe pointmap, intrinsics, depth
-   - `{name}.npy` -- per-object binary masks (uint8, 0/255)
+
+2. **Bake transforms** (lines 143-152): Apply the final S, R, T into vertex positions using a custom `Transform3d` class (lines 46-91) that follows PyTorch3D row-vector convention (`points_h @ M`). After this, the GLB file contains vertices already in camera space -- no additional transforms needed at render time:
+
+   ```python
+   tfm = Transform3d().scale(scale).rotate(R_mat).translate(tx, ty, tz)
+   vertices_world = tfm.transform_points(vertices)
+   ```
+
+3. **Export** (lines 182-183): Save as `.glb` per object via `trimesh.export()`
+4. **Save metadata** (lines 198-213):
+   - `{name}_info.json` -- per-object transform details (translation, rotation wxyz, scale, intrinsics)
+   - Additional files saved by the orchestrator (`tools/sam3d/init.py`):
+     - `object_transforms.json` -- all objects' translation, rotation (wxyz quaternion), scale
+     - `target_moge.npz` -- MoGe pointmap, intrinsics, depth
+     - `{name}.npy` -- per-object binary masks (uint8, 0/255)
+
+**Note:** The `Transform3d` class in `sam3d_worker.py` (lines 46-91) is a **custom pure-PyTorch reimplementation**, NOT PyTorch3D's `Transform3d`. It was written to avoid a PyTorch3D dependency in the worker. It stores translation in row 3 (matching PyTorch3D's row-vector convention), which was the subject of a previous bug fix (see MEMORY.md: "SAM3D Transform3d Bugs Fixed").
 
 ---
 
