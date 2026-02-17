@@ -160,14 +160,32 @@ def main() -> None:
     p.add_argument("--config", required=True, help="Path to SAM3D config file")
     p.add_argument("--glb", required=True, help="Path for output GLB file")
     p.add_argument("--info", required=False, help="Path to save JSON output (instead of stdout)")
+    p.add_argument("--scene-image", required=False, help="Path to full scene image for MoGe depth (avoids NaN on dark per-object images)")
     args = p.parse_args()
 
     inference = Inference(args.config, compile=False)
+
+    # Enable layout post-optimization with LAZY import to avoid VRAM conflict.
+    # pytorch3d import (required by post-opt) allocates CUDA memory; deferring
+    # the import until post-opt runs keeps VRAM free for TRELLIS model inference.
+    def _lazy_layout_post_opt(*a, **kw):
+        from sam3d_objects.pipeline.inference_utils import layout_post_optimization
+        return layout_post_optimization(*a, **kw)
+
+    inference._pipeline.layout_post_optimization_method = _lazy_layout_post_opt
+
     image = load_image(args.image)
     # Load mask from npy file
     mask = np.load(args.mask)
     mask = mask > 0
-    output = inference(image, mask, seed=42)
+
+    # Load full scene image for MoGe depth if provided (avoids NaN on
+    # mostly-black per-object images where MoGe can't estimate depth).
+    scene_image = None
+    if args.scene_image:
+        scene_image = load_image(args.scene_image)
+
+    output = inference(image, mask, seed=42, scene_image=scene_image)
 
     mesh = output["glb"]
     vertices = mesh.vertices
@@ -195,6 +213,13 @@ def main() -> None:
         if hasattr(pm, 'shape'):
             intrinsics_data["pointmap_shape"] = list(pm.shape)
 
+    # Extract layout post-optimization IoU if available
+    iou_data = {}
+    if "iou" in output:
+        iou_val = output["iou"]
+        iou_data["iou"] = float(iou_val) if not isinstance(iou_val, float) else iou_val
+        print(f"Layout post-opt IoU: {iou_data['iou']:.4f}", flush=True)
+
     # Prepare output data
     translation_data = {
         "glb_path": args.glb,
@@ -202,6 +227,7 @@ def main() -> None:
         "rotation": R.tolist(),
         "scale": S.tolist(),
         **intrinsics_data,
+        **iou_data,
     }
 
     # Write to file if --info provided, otherwise print to stdout for backward compatibility
