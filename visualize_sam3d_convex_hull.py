@@ -1,15 +1,14 @@
 """Visualize SAM3D convex_hull_v2 results: project 3D GLB vertices onto 2D scene.
 
-For each object, creates:
-  - {name}_compare.png   : 3-panel [object photo | depth projection | scene overlay]
-  - scene_overlay.png    : all objects projected onto the scene image
-  - scene_overlay_depth.png : all objects projected onto the depth map
-
-GLB vertices are in PyTorch3D camera space (X-left, Y-up, Z-forward).
-Convert to OpenCV (X-right, Y-down, Z-forward) by negating X and Y, then project.
+Matches the format of output/sam3d_dining_v4:
+  - Grayscale depth map as background for scene overlays
+  - Distinct neon colors per object (same OBJECT_COLORS as reoptimize_depth.py)
+  - 1 pixel per vertex, no subsampling, back-to-front depth order
+  - Side-by-side comparison: 2D masks (left) vs 3D projections (right)
+  - Per-object 3-panel: photo+mask | 3D projection (depth-colored) | 3D on depth bg
 
 Usage:
-    C:/Users/kingy/miniconda3/envs/agent/python.exe visualize_sam3d_convex_hull.py
+    C:/Users/kingy/miniconda3/envs/sam3d_py311/python.exe visualize_sam3d_convex_hull.py
 """
 
 from __future__ import annotations
@@ -41,36 +40,35 @@ OBJECTS = [
     "envelope",
 ]
 
-# Distinct bright colors per object (RGB)
-COLORS = [
-    (255,  60,  60),   # red    – green_tea_bottle
-    ( 60, 200,  60),   # green  – ito_en_bottle
-    ( 60, 120, 255),   # blue   – alienware_keyboard
-    (255, 180,   0),   # yellow – headphones
-    (200,   0, 255),   # purple – envelope
+# Same palette as reoptimize_depth.py
+OBJECT_COLORS = [
+    (230, 25, 75),    # red
+    (60, 180, 75),    # green
+    (0, 130, 200),    # blue
+    (255, 225, 25),   # yellow
+    (245, 130, 48),   # orange
+    (145, 30, 180),   # purple
+    (70, 240, 240),   # cyan
+    (240, 50, 230),   # magenta
+    (210, 245, 60),   # lime
+    (250, 190, 212),  # pink
 ]
 
 # ---------------------------------------------------------------------------
-# Geometry helpers
+# Geometry helpers (identical to reoptimize_depth.py)
 # ---------------------------------------------------------------------------
 
 def load_glb_vertices(glb_path: Path) -> np.ndarray:
-    """Load all mesh vertices from a GLB file (concatenated)."""
-    try:
-        import trimesh
-        scene = trimesh.load(str(glb_path), force="scene")
-        all_verts = []
-        for geom in scene.geometry.values():
-            if hasattr(geom, "vertices"):
-                all_verts.append(np.asarray(geom.vertices, dtype=np.float32))
-        return np.concatenate(all_verts, axis=0) if all_verts else np.zeros((0, 3), np.float32)
-    except Exception as e:
-        print(f"  [WARN] trimesh failed: {e}")
-        return np.zeros((0, 3), np.float32)
+    import trimesh
+    scene = trimesh.load(str(glb_path), force="scene")
+    all_verts = []
+    for geom in scene.geometry.values():
+        if hasattr(geom, "vertices"):
+            all_verts.append(np.asarray(geom.vertices, dtype=np.float32))
+    return np.concatenate(all_verts, axis=0) if all_verts else np.zeros((0, 3), np.float32)
 
 
 def pt3d_to_opencv(verts: np.ndarray) -> np.ndarray:
-    """Convert PyTorch3D (X-left, Y-up, Z-fwd) → OpenCV (X-right, Y-down, Z-fwd)."""
     out = verts.copy()
     out[:, 0] = -verts[:, 0]
     out[:, 1] = -verts[:, 1]
@@ -78,111 +76,161 @@ def pt3d_to_opencv(verts: np.ndarray) -> np.ndarray:
 
 
 def project(verts_cv: np.ndarray, fx: float, fy: float, cx: float, cy: float):
-    """Project OpenCV-space 3D points to pixel coordinates.
-
-    Returns:
-        uv : (N, 2) float pixel coords
-        z  : (N,)  depth
-    """
     z = verts_cv[:, 2]
     u = fx * verts_cv[:, 0] / (z + 1e-8) + cx
     v = fy * verts_cv[:, 1] / (z + 1e-8) + cy
     return np.stack([u, v], axis=-1), z
 
 
-def subsample(verts: np.ndarray, n: int = 50_000) -> np.ndarray:
-    """Randomly subsample to at most n points."""
-    if len(verts) <= n:
-        return verts
-    idx = np.random.default_rng(0).choice(len(verts), n, replace=False)
-    return verts[idx]
+def _font(size: int = 13):
+    try:
+        return ImageFont.truetype("arial.ttf", size)
+    except OSError:
+        return ImageFont.load_default()
 
 # ---------------------------------------------------------------------------
-# Rendering helpers
+# Rendering: depth-colored projection on gray canvas (same as dining_v4)
 # ---------------------------------------------------------------------------
 
-def render_vertices_on_canvas(
+def render_projected_vertices(
     verts_pt3d: np.ndarray,
     fx: float, fy: float, cx: float, cy: float,
     H: int, W: int,
     depth_map: np.ndarray,
-    color: tuple[int, int, int] | None = None,
-    bg: np.ndarray | None = None,
-    dot_radius: int = 1,
 ) -> np.ndarray:
-    """Project vertices and paint them on a canvas.
-
-    Args:
-        verts_pt3d : (N, 3) vertices in PyTorch3D camera space
-        color      : If given, use this fixed RGB color. Otherwise color by depth.
-        bg         : Background image (H, W, 3) uint8. If None, gray canvas.
-        dot_radius : Dot size (pixels). 1 = single pixel, 2 = 3x3 square, etc.
-    """
-    if bg is not None:
-        canvas = bg.copy().astype(np.uint8)
-    else:
-        canvas = np.full((H, W, 3), 220, dtype=np.uint8)
-
-    if len(verts_pt3d) == 0:
-        return canvas
-
-    verts = subsample(verts_pt3d)
-    verts_cv = pt3d_to_opencv(verts)
+    """Project all vertices and colour by depth. Light gray background.
+    Identical to reoptimize_depth.py render_projected_vertices()."""
+    verts_cv = pt3d_to_opencv(verts_pt3d)
     uv, z_v = project(verts_cv, fx, fy, cx, cy)
 
     u_int = np.round(uv[:, 0]).astype(np.int32)
     v_int = np.round(uv[:, 1]).astype(np.int32)
     valid = (u_int >= 0) & (u_int < W) & (v_int >= 0) & (v_int < H) & (z_v > 0)
 
-    if not valid.any():
-        return canvas
+    vmin, vmax = depth_map.min(), depth_map.max()
+    render = np.ones((H, W, 3), dtype=np.uint8) * 240  # light gray bg
 
-    u_v, v_v = u_int[valid], v_int[valid]
-    z_valid = z_v[valid]
-
-    if color is not None:
-        r_arr = np.full(valid.sum(), color[0], dtype=np.uint8)
-        g_arr = np.full(valid.sum(), color[1], dtype=np.uint8)
-        b_arr = np.full(valid.sum(), color[2], dtype=np.uint8)
-    else:
-        vmin, vmax = depth_map.min(), depth_map.max()
+    if valid.sum() > 0:
+        u_v, v_v = u_int[valid], v_int[valid]
+        z_valid = z_v[valid]
         z_norm = np.clip((z_valid - vmin) / (vmax - vmin + 1e-6), 0, 1)
-        r_arr = np.clip((1.0 - z_norm) * 255, 0, 255).astype(np.uint8)
-        g_arr = np.clip(z_norm * 200 + 55, 0, 255).astype(np.uint8)
-        b_arr = np.clip(z_norm * 255, 0, 255).astype(np.uint8)
 
-    # Paint back-to-front (furthest first)
-    order = np.argsort(-z_valid)
+        r = np.clip((1.0 - z_norm) * 255, 0, 255).astype(np.uint8)
+        g = np.clip(z_norm * 200 + 55, 0, 255).astype(np.uint8)
+        b = np.clip(z_norm * 255, 0, 255).astype(np.uint8)
 
-    if dot_radius <= 1:
+        # Back-to-front (far first)
+        order = np.argsort(-z_valid)
         flat_idx = v_v[order] * W + u_v[order]
-        flat = canvas.reshape(-1, 3)
-        flat[flat_idx] = np.stack([r_arr[order], g_arr[order], b_arr[order]], axis=-1)
-    else:
-        r = dot_radius
-        for i in order:
-            vi, ui = int(v_v[i]), int(u_v[i])
-            v0, v1 = max(0, vi - r), min(H, vi + r + 1)
-            u0, u1 = max(0, ui - r), min(W, ui + r + 1)
-            canvas[v0:v1, u0:u1] = [r_arr[i], g_arr[i], b_arr[i]]
+        flat = render.reshape(-1, 3)
+        flat[flat_idx] = np.stack([r[order], g[order], b[order]], axis=-1)
 
+    return render
+
+# ---------------------------------------------------------------------------
+# Rendering: colored dots on grayscale depth map (scene overlay)
+# ---------------------------------------------------------------------------
+
+def paint_scene_overlay(
+    verts_dict: dict[str, np.ndarray],
+    depth_bg: np.ndarray,   # (H, W, 3) uint8 grayscale
+    fx: float, fy: float, cx: float, cy: float,
+    H: int, W: int,
+) -> np.ndarray:
+    """Paint each object's projected vertices onto a copy of depth_bg."""
+    canvas = depth_bg.copy()
+    for idx, (name, verts) in enumerate(verts_dict.items()):
+        if len(verts) == 0:
+            continue
+        color = OBJECT_COLORS[idx % len(OBJECT_COLORS)]
+        verts_cv = pt3d_to_opencv(verts)
+        uv, z_v = project(verts_cv, fx, fy, cx, cy)
+        u_int = np.round(uv[:, 0]).astype(np.int32)
+        v_int = np.round(uv[:, 1]).astype(np.int32)
+        valid = (u_int >= 0) & (u_int < W) & (v_int >= 0) & (v_int < H) & (z_v > 0)
+        if valid.sum() == 0:
+            continue
+        u_v, v_v = u_int[valid], v_int[valid]
+        order = np.argsort(-z_v[valid])   # back-to-front
+        canvas[v_v[order], u_v[order]] = color
     return canvas
 
 
-def add_label(canvas_pil: Image.Image, text: str, x: int = 4, y: int = 4,
-              color=(255, 255, 255)) -> None:
-    """Draw a text label on a PIL image in place."""
-    draw = ImageDraw.Draw(canvas_pil)
-    try:
-        font = ImageFont.truetype("arial.ttf", 15)
-    except OSError:
-        font = ImageFont.load_default()
-    # Shadow
-    draw.text((x + 1, y + 1), text, fill=(0, 0, 0), font=font)
-    draw.text((x, y), text, fill=color, font=font)
+def paint_masks_overlay(
+    masks_dict: dict[str, np.ndarray],   # name -> (H, W) uint8 mask
+    depth_bg: np.ndarray,
+) -> np.ndarray:
+    """Paint each object's 2D mask boundary + fill onto depth_bg."""
+    canvas = depth_bg.copy()
+    for idx, (name, mask) in enumerate(masks_dict.items()):
+        if mask is None or not mask.any():
+            continue
+        color = OBJECT_COLORS[idx % len(OBJECT_COLORS)]
+        mask_bool = mask > 0
+        # Paint fill lightly (blend 40%)
+        fill = np.array(color, dtype=np.float32)
+        canvas[mask_bool] = np.clip(
+            0.6 * canvas[mask_bool].astype(np.float32) + 0.4 * fill, 0, 255
+        ).astype(np.uint8)
+        # Paint outline solidly
+        eroded = binary_erosion(mask_bool, iterations=2)
+        edge = mask_bool & ~eroded
+        canvas[edge] = color
+    return canvas
 
 # ---------------------------------------------------------------------------
-# Per-object comparison image
+# Scene comparison: 2D masks (left) vs 3D projections (right)
+# ---------------------------------------------------------------------------
+
+def make_scene_comparison(
+    verts_dict: dict[str, np.ndarray],
+    masks_dict: dict[str, np.ndarray],
+    depth: np.ndarray,
+    fx: float, fy: float, cx: float, cy: float,
+    H: int, W: int,
+    output_path: Path,
+) -> None:
+    """Side-by-side: 2D masks on depth (left) | 3D projections on depth (right).
+
+    Matches the format of sam3d_dining_v4/scene_2d_comparison.png.
+    """
+    dmin, dmax = depth.min(), depth.max()
+    depth_norm = ((depth - dmin) / (dmax - dmin + 1e-6) * 255).astype(np.uint8)
+    depth_bg = np.stack([depth_norm, depth_norm, depth_norm], axis=-1)
+
+    left_img  = paint_masks_overlay(masks_dict, depth_bg)
+    right_img = paint_scene_overlay(verts_dict, depth_bg, fx, fy, cx, cy, H, W)
+
+    gap = 6
+    header_h = 50
+    canvas_w = W * 2 + gap
+    canvas = np.ones((H + header_h, canvas_w, 3), dtype=np.uint8) * 30  # dark bg
+
+    canvas[header_h:, :W]        = left_img
+    canvas[header_h:, W + gap:]  = right_img
+
+    img = Image.fromarray(canvas)
+    draw = ImageDraw.Draw(img)
+    font     = _font(14)
+    font_sm  = _font(11)
+
+    # Panel titles
+    draw.text((W // 2 - 40, 4),          "2D MASKS",       fill=(255, 100, 100), font=font)
+    draw.text((W + gap + W // 2 - 60, 4), "3D PROJECTIONS", fill=(100, 255, 100), font=font)
+
+    # Horizontal legend (object name → color square)
+    x0 = 8
+    for idx, name in enumerate(verts_dict.keys()):
+        color = OBJECT_COLORS[idx % len(OBJECT_COLORS)]
+        draw.rectangle([x0, 26, x0 + 10, 38], fill=color)
+        draw.text((x0 + 14, 25), name, fill=(200, 200, 200), font=font_sm)
+        x0 += len(name) * 7 + 26
+
+    img.save(str(output_path))
+    print(f"  Saved: {output_path.name}")
+
+# ---------------------------------------------------------------------------
+# Per-object comparison image (3 panels, white bg — matches dining_v4)
 # ---------------------------------------------------------------------------
 
 def make_object_compare(
@@ -190,170 +238,65 @@ def make_object_compare(
     verts_pt3d: np.ndarray,
     mask_raw: np.ndarray,
     png_path: Path,
-    scene_rgb: np.ndarray,
     depth: np.ndarray,
+    depth_bg: np.ndarray,
     fx: float, fy: float, cx: float, cy: float,
     H: int, W: int,
     iou: float,
-    color: tuple[int, int, int],
     output_path: Path,
 ) -> None:
-    """3-panel comparison image for one object.
+    """3-panel: photo+mask | depth-colored 3D projection | 3D on depth bg.
 
-    Panel 1: Object photo with mask outline (green)
-    Panel 2: GLB projected on gray canvas, depth-colored
-    Panel 3: GLB projected on scene image with object color
+    Matches sam3d_dining_v4/{name}_compare.png format.
     """
-    # --- Panel 1: object photo with mask outline ---
+    # --- Panel 1: object photo with mask outline (black bg) ---
     if png_path.exists():
-        photo = np.array(Image.open(png_path).convert("RGB"))
+        photo = np.array(Image.open(png_path).convert("RGB").resize((W, H), Image.LANCZOS))
     else:
-        photo = scene_rgb.copy()
+        photo = np.zeros((H, W, 3), dtype=np.uint8)
 
-    # Draw mask outline on photo
     mask_bool = mask_raw > 0
     if mask_bool.any():
         eroded = binary_erosion(mask_bool, iterations=2)
         edge = mask_bool & ~eroded
-        photo_copy = photo.copy()
-        photo_copy[edge] = [0, 255, 0]
-    else:
-        photo_copy = photo.copy()
-    panel1 = photo_copy  # (H, W, 3)
+        photo[edge] = [0, 255, 0]
+    panel1 = photo  # black bg (object photo already has bg blacked in sam_init PNGs)
 
-    # --- Panel 2: depth-colored projection on gray ---
-    panel2 = render_vertices_on_canvas(
-        verts_pt3d, fx, fy, cx, cy, H, W, depth,
-        color=None, bg=None, dot_radius=1,
-    )
+    # --- Panel 2: depth-colored projection on light gray bg ---
+    panel2 = render_projected_vertices(verts_pt3d, fx, fy, cx, cy, H, W, depth)
 
-    # --- Panel 3: fixed-color projection on scene image ---
-    panel3 = render_vertices_on_canvas(
-        verts_pt3d, fx, fy, cx, cy, H, W, depth,
-        color=color, bg=scene_rgb, dot_radius=2,
-    )
+    # --- Panel 3: single-color projection on depth map bg ---
+    panel3 = depth_bg.copy()
+    if len(verts_pt3d) > 0:
+        verts_cv = pt3d_to_opencv(verts_pt3d)
+        uv, z_v = project(verts_cv, fx, fy, cx, cy)
+        u_int = np.round(uv[:, 0]).astype(np.int32)
+        v_int = np.round(uv[:, 1]).astype(np.int32)
+        valid = (u_int >= 0) & (u_int < W) & (v_int >= 0) & (v_int < H) & (z_v > 0)
+        if valid.sum() > 0:
+            u_v, v_v = u_int[valid], v_int[valid]
+            order = np.argsort(-z_v[valid])
+            idx = OBJECTS.index(obj_name) if obj_name in OBJECTS else 0
+            panel3[v_v[order], u_v[order]] = OBJECT_COLORS[idx % len(OBJECT_COLORS)]
 
+    # Assemble on white canvas with 40px header
     gap = 4
-    header = 32
-    total_w = W * 3 + gap * 2
-    canvas = np.ones((H + header, total_w, 3), dtype=np.uint8) * 40  # dark bg
-
-    canvas[header:, :W] = panel1
-    canvas[header:, W + gap: W * 2 + gap] = panel2
-    canvas[header:, W * 2 + gap * 2:] = panel3
+    canvas = np.ones((H + 40, W * 3 + gap * 2, 3), dtype=np.uint8) * 255
+    canvas[40:, :W]                  = panel1
+    canvas[40:, W + gap: W * 2 + gap] = panel2
+    canvas[40:, W * 2 + gap * 2:]    = panel3
 
     img = Image.fromarray(canvas)
-    iou_str = f"{iou:.4f}" if isinstance(iou, float) and iou >= 0 else "N/A"
-    add_label(img, f"{obj_name} — Mask", x=4, y=4)
-    add_label(img, "Depth projection", x=W + gap + 4, y=4)
-    add_label(img, f"Scene overlay  IoU={iou_str}", x=W * 2 + gap * 2 + 4, y=4)
-    img.save(str(output_path))
-    print(f"  Saved: {output_path.name}")
-
-
-# ---------------------------------------------------------------------------
-# Scene overlay image
-# ---------------------------------------------------------------------------
-
-def make_scene_overlay(
-    objects_verts: dict[str, np.ndarray],
-    scene_rgb: np.ndarray,
-    depth: np.ndarray,
-    fx: float, fy: float, cx: float, cy: float,
-    H: int, W: int,
-    output_path: Path,
-    title: str = "Scene 2D Overlay",
-) -> None:
-    """Overlay all objects on scene image with distinct colors + legend."""
-    canvas = scene_rgb.copy().astype(np.float32)  # for blending
-
-    legend_items = []
-    for (name, verts), color in zip(objects_verts.items(), COLORS):
-        if len(verts) == 0:
-            continue
-        v = subsample(verts)
-        verts_cv = pt3d_to_opencv(v)
-        uv, z_v = project(verts_cv, fx, fy, cx, cy)
-        u_int = np.round(uv[:, 0]).astype(np.int32)
-        v_int = np.round(uv[:, 1]).astype(np.int32)
-        valid = (u_int >= 0) & (u_int < W) & (v_int >= 0) & (v_int < H) & (z_v > 0)
-        if not valid.any():
-            continue
-        u_v, v_v = u_int[valid], v_int[valid]
-        r = 2
-        for i in range(len(u_v)):
-            vi, ui = int(v_v[i]), int(u_v[i])
-            v0, v1 = max(0, vi - r), min(H, vi + r + 1)
-            u0, u1 = max(0, ui - r), min(W, ui + r + 1)
-            canvas[v0:v1, u0:u1] = (
-                0.4 * canvas[v0:v1, u0:u1] +
-                0.6 * np.array(color, dtype=np.float32)
-            )
-        legend_items.append((name, color))
-
-    canvas = np.clip(canvas, 0, 255).astype(np.uint8)
-    img = Image.fromarray(canvas)
-
-    # Draw legend
     draw = ImageDraw.Draw(img)
-    try:
-        font = ImageFont.truetype("arial.ttf", 14)
-    except OSError:
-        font = ImageFont.load_default()
-    lx, ly = 8, 8
-    for label, col in legend_items:
-        draw.rectangle([lx, ly, lx + 14, ly + 14], fill=col)
-        draw.text((lx + 18, ly), label, fill=(255, 255, 255), font=font)
-        ly += 20
+    font = _font(13)
 
-    add_label(img, title, x=W // 2 - 80, y=4, color=(255, 255, 100))
+    iou_str = f"{iou:.4f}" if isinstance(iou, float) and iou >= 0 else "N/A"
+    draw.text((4,               4), f"{obj_name} - Mask",              fill=(0, 0, 0),     font=font)
+    draw.text((W + gap + 4,     4), f"3D Projection (depth-colored)",   fill=(180, 50, 50), font=font)
+    draw.text((W * 2 + gap*2 + 4, 4), f"3D on depth map  IoU={iou_str}", fill=(50, 160, 50), font=font)
+
     img.save(str(output_path))
     print(f"  Saved: {output_path.name}")
-
-
-def make_depth_overlay(
-    objects_verts: dict[str, np.ndarray],
-    depth: np.ndarray,
-    fx: float, fy: float, cx: float, cy: float,
-    H: int, W: int,
-    output_path: Path,
-) -> None:
-    """Overlay projected vertices on depth map (turbo colormap)."""
-    try:
-        import matplotlib.pyplot as plt
-        import matplotlib.cm as cm
-
-        depth_norm = (depth - depth.min()) / (depth.max() - depth.min() + 1e-6)
-        depth_rgb = (cm.turbo(depth_norm)[:, :, :3] * 255).astype(np.uint8)
-    except ImportError:
-        depth_norm = (depth - depth.min()) / (depth.max() - depth.min() + 1e-6)
-        depth_rgb = (np.stack([depth_norm] * 3, axis=-1) * 255).astype(np.uint8)
-
-    canvas = depth_rgb.copy().astype(np.float32)
-
-    for (name, verts), color in zip(objects_verts.items(), COLORS):
-        if len(verts) == 0:
-            continue
-        v = subsample(verts)
-        verts_cv = pt3d_to_opencv(v)
-        uv, z_v = project(verts_cv, fx, fy, cx, cy)
-        u_int = np.round(uv[:, 0]).astype(np.int32)
-        v_int = np.round(uv[:, 1]).astype(np.int32)
-        valid = (u_int >= 0) & (u_int < W) & (v_int >= 0) & (v_int < H) & (z_v > 0)
-        if not valid.any():
-            continue
-        u_v, v_int_v = u_int[valid], v_int[valid]
-        r = 2
-        for i in range(len(u_v)):
-            vi, ui = int(v_int_v[i]), int(u_v[i])
-            v0, v1 = max(0, vi - r), min(H, vi + r + 1)
-            u0, u1 = max(0, ui - r), min(W, ui + r + 1)
-            canvas[v0:v1, u0:u1] = np.array(color, dtype=np.float32)
-
-    out = Image.fromarray(np.clip(canvas, 0, 255).astype(np.uint8))
-    out.save(str(output_path))
-    print(f"  Saved: {output_path.name}")
-
 
 # ---------------------------------------------------------------------------
 # Main
@@ -362,23 +305,24 @@ def make_depth_overlay(
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Load MoGe results
     print("Loading MoGe results...")
     npz = np.load(str(MOGE_NPZ))
     K = npz["intrinsics_px"].astype(np.float64)
     fx, fy = float(K[0, 0]), float(K[1, 1])
     cx, cy = float(K[0, 2]), float(K[1, 2])
-    depth = npz["depth"].astype(np.float32)
+    depth  = npz["depth"].astype(np.float32)
     W = int(npz["image_width"])
     H = int(npz["image_height"])
     print(f"  Camera: fx={fx:.1f} fy={fy:.1f}  cx={cx:.1f} cy={cy:.1f}")
     print(f"  Image:  {W}x{H}  depth=[{depth.min():.3f}, {depth.max():.3f}]")
 
-    # Load scene image
-    scene_img = Image.open(str(SCENE_IMG)).convert("RGB").resize((W, H), Image.LANCZOS)
-    scene_rgb = np.array(scene_img)
+    # Shared depth background for scene overlays
+    dmin, dmax = depth.min(), depth.max()
+    depth_norm = ((depth - dmin) / (dmax - dmin + 1e-6) * 255).astype(np.uint8)
+    depth_bg   = np.stack([depth_norm, depth_norm, depth_norm], axis=-1)
 
-    objects_verts: dict[str, np.ndarray] = {}
+    verts_dict: dict[str, np.ndarray] = {}
+    masks_dict: dict[str, np.ndarray] = {}
     iou_map: dict[str, float] = {}
 
     for name in OBJECTS:
@@ -390,60 +334,49 @@ def main() -> None:
         mask_path = SAM_INIT / f"{name}.npy"
         png_path  = SAM_INIT / f"{name}.png"
 
-        if not glb_path.exists():
-            print(f"  [SKIP] No GLB: {glb_path}")
-            objects_verts[name] = np.zeros((0, 3), np.float32)
-            continue
-
-        # Load GLB vertices (PyTorch3D camera space)
-        verts = load_glb_vertices(glb_path)
-        print(f"  Vertices: {len(verts):,}")
-
-        if len(verts) > 0:
-            # Quick sanity: depth range of projected vertices
-            vc = pt3d_to_opencv(verts)
-            valid_z = vc[vc[:, 2] > 0, 2]
-            print(f"  Depth range: [{valid_z.min():.3f}, {valid_z.max():.3f}]" if len(valid_z) else "  No valid depth")
-
-        objects_verts[name] = verts
+        # Load mask
+        mask_raw = np.load(str(mask_path)).astype(np.uint8) if mask_path.exists() else np.zeros((H, W), np.uint8)
+        masks_dict[name] = mask_raw
 
         # Load IoU
         iou = -1.0
         if info_path.exists():
-            info = json.loads(info_path.read_text())
-            iou = float(info.get("iou", -1.0))
+            iou = float(json.loads(info_path.read_text()).get("iou", -1.0))
         iou_map[name] = iou
-        print(f"  IoU: {iou:.4f}" if iou >= 0 else f"  IoU: N/A")
+        print(f"  IoU: {iou:.4f}" if iou >= 0 else "  IoU: N/A")
 
-        # Load mask and PNG
-        mask_raw = np.load(str(mask_path)).astype(np.uint8) if mask_path.exists() else np.zeros((H, W), np.uint8)
+        # Load GLB vertices (PyTorch3D camera space)
+        if not glb_path.exists():
+            print(f"  [SKIP] No GLB")
+            verts_dict[name] = np.zeros((0, 3), np.float32)
+            continue
 
-        # Find this object's color
-        idx = OBJECTS.index(name)
-        color = COLORS[idx]
+        verts = load_glb_vertices(glb_path)
+        print(f"  Vertices: {len(verts):,}")
+        verts_dict[name] = verts
+
+        if len(verts) > 0:
+            vc = pt3d_to_opencv(verts)
+            valid_z = vc[vc[:, 2] > 0, 2]
+            if len(valid_z):
+                print(f"  Depth range: [{valid_z.min():.3f}, {valid_z.max():.3f}]")
 
         # Per-object comparison image
-        out_path = OUTPUT_DIR / f"{name}_compare.png"
         make_object_compare(
             name, verts, mask_raw, png_path,
-            scene_rgb, depth,
+            depth, depth_bg,
             fx, fy, cx, cy, H, W,
-            iou, color, out_path,
+            iou,
+            OUTPUT_DIR / f"{name}_compare.png",
         )
 
-    # Scene overlays
+    # Scene comparison: 2D masks (left) vs 3D projections (right)
     print(f"\n{'='*50}")
-    print("Generating scene overlays...")
-    make_scene_overlay(
-        objects_verts, scene_rgb, depth,
+    print("Generating scene comparison overlay...")
+    make_scene_comparison(
+        verts_dict, masks_dict, depth,
         fx, fy, cx, cy, H, W,
-        OUTPUT_DIR / "scene_overlay.png",
-        title="SAM3D Convex Hull v2 — All Objects",
-    )
-    make_depth_overlay(
-        objects_verts, depth,
-        fx, fy, cx, cy, H, W,
-        OUTPUT_DIR / "scene_overlay_depth.png",
+        OUTPUT_DIR / "scene_2d_comparison.png",
     )
 
     # Summary
@@ -451,7 +384,7 @@ def main() -> None:
     print("Results summary:")
     for name in OBJECTS:
         iou = iou_map.get(name, -1.0)
-        n = len(objects_verts.get(name, []))
+        n = len(verts_dict.get(name, []))
         print(f"  {name:<25}  IoU={iou:.4f}  verts={n:,}")
     print(f"\nOutput: {OUTPUT_DIR}")
 
