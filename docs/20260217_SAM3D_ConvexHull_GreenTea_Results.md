@@ -99,7 +99,7 @@ All transforms in PyTorch3D camera space (X-left, Y-up, Z-forward). Stored in `*
 - **Position:** Foreground center, Z = 1.128 m
 - **Note:** Best result in the scene; only 22% visible pixels in mask yet MoGe succeeded via scene-image fix
 
-**Convex hull mask growth** (171,297px → +4,772px added at shoulder/neck arc, threshold=60.0°):
+**Convex hull mask growth** (171,297px → +7,585px added at shoulder gaps, threshold=0.392):
 
 ![ito_en_bottle_mask_growth](../output/sam3d_convex_hull_v2/vis/ito_en_bottle_mask_growth.png)
 
@@ -117,7 +117,7 @@ All transforms in PyTorch3D camera space (X-left, Y-up, Z-forward). Stored in `*
 - **Position:** Top-left of depth map, Z = 2.398 m (furthest object)
 - **Note:** Only 2.5% visible pixels — scene-image MoGe critical for this object
 
-**Convex hull mask growth** (19,971px → +727px added at corners, threshold=29.0°):
+**Convex hull mask growth** (19,971px → +1,059px added at corners, threshold=0.498):
 
 ![envelope_mask_growth](../output/sam3d_convex_hull_v2/vis/envelope_mask_growth.png)
 
@@ -135,7 +135,7 @@ All transforms in PyTorch3D camera space (X-left, Y-up, Z-forward). Stored in `*
 - **Position:** Top-right of depth map, Z = 2.341 m
 - **Note:** Only 1.5% visible pixels — smallest mask in the scene
 
-**Convex hull mask growth** (11,950px → +71px, threshold=60.0° — mask already nearly convex, hull gap only 61px):
+**Convex hull mask growth** (11,950px → +74px, threshold=0.064 — mask already nearly convex):
 
 ![headphones_mask_growth](../output/sam3d_convex_hull_v2/vis/headphones_mask_growth.png)
 
@@ -153,7 +153,7 @@ All transforms in PyTorch3D camera space (X-left, Y-up, Z-forward). Stored in `*
 - **Position:** Right-center of scene, Z = 1.939 m
 - **Note:** Slightly offset from ground truth; large flat object with ~10% visible pixels
 
-**Convex hull mask growth** (78,243px → +2,129px filling concavities, threshold=48.0°):
+**Convex hull mask growth** (78,243px → +1,154px filling left-edge gap, threshold=0.063):
 
 ![alienware_keyboard_mask_growth](../output/sam3d_convex_hull_v2/vis/alienware_keyboard_mask_growth.png)
 
@@ -171,11 +171,11 @@ All transforms in PyTorch3D camera space (X-left, Y-up, Z-forward). Stored in `*
 - **Position:** Center-left foreground, Z = 1.383 m
 - **Note:** Dark shadow visible in SAM mask contaminated the reconstruction. Largest shadow artifact in the scene.
 
-**Convex hull mask growth** (276,302px → +209px, threshold=18.3° — normal-consistency correctly rejects hull region as different surface):
+**Convex hull mask growth** (276,302px → +5,903px, threshold=0.012 — very low, near-uniform depth across mask):
 
 ![green_tea_bottle_mask_growth](../output/sam3d_convex_hull_v2/vis/green_tea_bottle_mask_growth.png)
 
-*The normal-consistency method reveals why the SAM mask is problematic: the 276K px mask (35% of scene) already covers the large flat shadow/table region. The hull region outside the mask has different normals, so almost nothing is added (+209px). This is better than the old Sobel method (+5,903px), which blindly added more flat surface pixels and worsened the degenerate TRELLIS reconstruction.*
+*The mask growth visualization reveals the root cause: the SAM mask (35% of scene, 276K px) already covers the large flat table/shadow region. The convex hull is even larger (332K px), and the depth gradient threshold is extremely low (0.012) because the shadow area has near-uniform depth — almost no edges inside the mask. This tells TRELLIS to reconstruct a large flat surface, not a bottle.*
 
 **Rotation GIF (Y-axis):**
 

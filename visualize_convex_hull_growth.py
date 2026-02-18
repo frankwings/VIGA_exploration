@@ -40,7 +40,7 @@ OBJECTS = [
 
 MASKS_DIR  = PROJECT_ROOT / "output/test/greentea/sam_init"
 MOGE_NPZ   = PROJECT_ROOT / "output/sam3d_rerun_fixed/target_moge.npz"
-OUTPUT_DIR = PROJECT_ROOT / "output/sam3d_convex_hull_v2/vis"
+OUTPUT_DIR = PROJECT_ROOT / "output/sam3d_convex_hull_v3/vis"
 
 # ---------------------------------------------------------------------------
 # Convex hull helper
