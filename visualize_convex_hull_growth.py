@@ -31,16 +31,20 @@ sys.path.insert(0, str(PROJECT_ROOT))
 # ---------------------------------------------------------------------------
 
 OBJECTS = [
-    "ito_en_bottle",
-    "green_tea_bottle",
-    "alienware_keyboard",
-    "headphones",
-    "envelope",
+    "chair_cushion",
+    "chair_legs",
+    "newspaper",
+    "placemat",
+    "round_table_with_tablecloth",
+    "sofa_with_patterned_cover",
+    "strainer",
+    "travel_pillow",
+    "wooden_chair",
 ]
 
-MASKS_DIR  = PROJECT_ROOT / "output/test/greentea/sam_init"
-MOGE_NPZ   = PROJECT_ROOT / "output/sam3d_rerun_fixed/target_moge.npz"
-OUTPUT_DIR = PROJECT_ROOT / "output/sam3d_convex_hull_v3/vis"
+MASKS_DIR  = PROJECT_ROOT / "output/sam3d_dining_v4"
+MOGE_NPZ   = PROJECT_ROOT / "output/sam3d_dining_v4/target_moge.npz"
+OUTPUT_DIR = PROJECT_ROOT / "output/sam3d_dining_v5/vis"
 
 # ---------------------------------------------------------------------------
 # Convex hull helper
@@ -74,7 +78,7 @@ def _make_convex_hull_mask(mask_bool: np.ndarray) -> np.ndarray:
 
 def _compute_local_normals(
     pointmap: np.ndarray,   # (H, W, 3)
-    smooth_sigma: float = 1.5,
+    smooth_sigma: float = 2.0,
 ) -> np.ndarray:
     """Per-pixel surface normals via central differences on the 3D point map.
 
@@ -106,7 +110,7 @@ def _grow_mask_normal_consistency(
     k_sigma: float = 2.0,
     min_threshold_deg: float = 10.0,
     max_threshold_deg: float = 60.0,
-    smooth_sigma: float = 1.5,
+    smooth_sigma: float = 2.0,
 ) -> tuple[np.ndarray, np.ndarray, float, np.ndarray, np.ndarray]:
     """Grow mask toward convex hull using surface normal consistency.
 
