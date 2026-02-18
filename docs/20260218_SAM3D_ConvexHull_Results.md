@@ -1,6 +1,8 @@
 # SAM3D Convex Hull v2 — Results & Findings
 
 **Date:** 2026-02-18
+**Author:** kingy + Claude (Sonnet 4.6)
+**Hardware:** RTX 5080 16GB | 32GB DDR5-6000 | Ryzen 9 9900X
 **Run:** `output/sam3d_convex_hull_v2/`
 **Scene:** Greentea (5 objects)
 
@@ -42,13 +44,33 @@ Generated `visualize_sam3d_convex_hull.py`, matching the `sam3d_dining_v4` forma
 
 Output: `output/sam3d_convex_hull_v2/vis/`
 
-### Observations from Projections
+### Scene Comparison
 
-- **ito_en_bottle**: 3D projection aligns perfectly with the bottle region in the depth map. Bottle silhouette is clearly reconstructed.
-- **alienware_keyboard**: Correct rectangular plate shape. Positioned to the right of scene — approximately correct.
-- **headphones**: Small capsule/disc shape at top-right of depth map — correct position.
-- **envelope**: Flat rectangular shape at top-left — correct position.
-- **green_tea_bottle**: Reconstruction degenerated to a flat disk. The projection shows a circular ring at the wrong depth. The TRELLIS model likely reconstructed the dark shadow/table area around the bottle cap rather than the bottle body itself. This is the object with the largest shadow artifact in the SAM segmentation mask.
+![scene_2d_comparison](../output/sam3d_convex_hull_v2/vis/scene_2d_comparison.png)
+
+*Left: 2D SAM masks on depth map. Right: 3D GLB projections on depth map.*
+
+### Per-Object Comparisons
+
+![ito_en_bottle_compare](../output/sam3d_convex_hull_v2/vis/ito_en_bottle_compare.png)
+
+**ito_en_bottle (IoU=0.9486):** 3D projection aligns perfectly with the bottle region. Bottle silhouette clearly reconstructed.
+
+![alienware_keyboard_compare](../output/sam3d_convex_hull_v2/vis/alienware_keyboard_compare.png)
+
+**alienware_keyboard (IoU=0.6466):** Correct rectangular plate shape, positioned to the right of scene — approximately correct.
+
+![headphones_compare](../output/sam3d_convex_hull_v2/vis/headphones_compare.png)
+
+**headphones (IoU=0.8256):** Small capsule/disc shape at top-right of depth map — correct position.
+
+![envelope_compare](../output/sam3d_convex_hull_v2/vis/envelope_compare.png)
+
+**envelope (IoU=0.8576):** Flat rectangular shape at top-left — correct position.
+
+![green_tea_bottle_compare](../output/sam3d_convex_hull_v2/vis/green_tea_bottle_compare.png)
+
+**green_tea_bottle (IoU=0.4545):** Reconstruction degenerated to a flat disk. The TRELLIS model likely reconstructed the dark shadow/table area around the bottle cap rather than the bottle body. Largest shadow artifact in the SAM mask.
 
 ---
 
