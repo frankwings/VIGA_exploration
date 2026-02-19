@@ -283,6 +283,15 @@ Aligns the mesh to the MoGe pointmap within the object's mask:
 2. **Scale matching** (lines 196-202): Scale the mesh to match the height (Y-extent) of the target point cloud
 3. **Centroid alignment** (lines 204-209): Translate the mesh centroid to match the target point cloud centroid
 4. **Quality check** (line 219): Compute silhouette IoU via `compute_iou()` (line 329)
+5. **flag_notgt check** (`inference_utils.py:123-132`): If the grown mask contains **zero** valid MoGe points (`target_object_points.shape[0] == 0`), the entire layout post-optimization is aborted immediately -- returns the raw TRELLIS pose with IoU = -1:
+
+   ```python
+   flag_notgt = target_object_points.shape[0] == 0
+   if flag_notgt:
+       return original_trellis_pose, iou=-1
+   ```
+
+   This was the failure mode for all 5 objects before the scene-image MoGe fix. Per-object masked images (mostly black) caused MoGe to output NaN pointmaps, making every pixel invalid. With `--scene-image` (full scene passed to MoGe), `flag_notgt` is now almost always False.
 
 **Space:** 3D camera space (PyTorch3D convention: X-left, Y-up, Z-forward)
 **Target:** Masked MoGe pointmap (only pixels within the object mask, with depth outlier filtering)
@@ -364,6 +373,39 @@ The silhouette term has weight 200, dominating the loss. The regularization term
 - Final IoU > pre-optimization IoU (must actually improve)
 
 If either condition fails, **the entire post-optimization is rejected** -- not just Stage 5c, but also Stages 5a and 5b. The code reverts to the raw Step 4 pose (`tfm = tfm_ori`, line 192). There is a commented-out alternative (line 193) that would keep Stages 5a+5b while rejecting only 5c, but it is not active.
+
+### Acceptance / Rejection Decision Tree
+
+Three rejection checkpoints in `layout_post_optimization` (`inference_utils.py:70-221`):
+
+| Checkpoint | Code Location | Condition | Result |
+| --- | --- | --- | --- |
+| Occlusion check | `inference_utils.py:98-106` | Border touch / occluded / holed mask | Skip all optimization → return raw Step 4 pose |
+| `flag_notgt` | `inference_utils.py:123-132` | No MoGe points inside grown mask | Abort → return raw TRELLIS pose, IoU = -1 |
+| ICP rejection | `inference_utils.py:140-165` | `ori_iou_shapeICP <= ori_iou` | Keep Stage 5a, discard ICP (`tfm2 = identity`) |
+| Global rejection | `inference_utils.py:190-193` | `optimized_iou < 0.5` OR `<= ori_iou` | Full revert: `tfm = tfm_ori` → raw Step 4 pose |
+
+```
+layout_post_optimization()
+    |
+    +--> [Occlusion check] failed?  →  return raw Step 4 pose
+    |
+    +--> [Stage 5a] run_alignment()
+    |        |
+    |        +--> flag_notgt (no valid points)?  →  return raw TRELLIS pose, IoU = -1
+    |
+    +--> [Stage 5b] run_ICP()
+    |        |
+    |        +--> IoU improved?  -- yes -->  keep ICP result (tfm2 = ICP)
+    |                            -- no  -->  discard ICP   (tfm2 = identity, keeps 5a only)
+    |
+    +--> [Stage 5c] run_render_compare()  (30-step Adam)
+             |
+             +--> IoU > 0.5 AND improved?  -- yes -->  accept (5a + 5b + 5c)
+                                           -- no  -->  tfm = tfm_ori → full revert to Step 4
+```
+
+**Key asymmetry:** ICP rejection is *local* (Stage 5a is preserved). Stage 5c rejection is *global* (reverts 5a + 5b + 5c together). A Stage 5c failure produces the same output as if no optimization ran at all.
 
 ### Critical Limitation of Step 5
 
