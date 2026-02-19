@@ -53,7 +53,16 @@ The "Normal+ok+Depth-fail" column below quantifies how many pixels the depth gat
 
 ## Per-Object Visualizations
 
-Each 4-panel: depth map | normal angle map (green=accepted, red=rejected) | grown mask (orange=added, blue=normal-ok+depth-fail) | angle histogram.
+Each image is a 2×2 grid:
+
+| Panel | Contents | Color legend |
+| --- | --- | --- |
+| **Top-left** | Depth map + original mask | Green (semi-transparent) = original mask pixels |
+| **Top-right** | Mask + convex hull | Green = cleaned mask · Dark blue = hull interior · **Yellow = hull boundary edge** · Red = pixels lost to erosion |
+| **Bottom-left** | Grown mask (final result) | Green = cleaned mask · **Orange = new growth pixels (accepted)** · Blue = normal-ok but depth-fail · Dark red = eroded pixels |
+| **Bottom-right** | Angle histogram | Blue bars = growth-region angle distribution · Red dashed = adaptive threshold |
+
+> Yellow = hull boundary, **not** growth pixels. Growth pixels = **orange** in bottom-left.
 
 ![chair_cushion_mask_growth](../output/sam3d_dining_v6/vis/chair_cushion_mask_growth.png)
 
@@ -119,10 +128,55 @@ Each 4-panel: depth map | normal angle map (green=accepted, red=rejected) | grow
 
 ---
 
+## v7: Relaxed Depth Threshold (10 cm)
+
+**Run:** `output/sam3d_dining_v7/`
+**Change:** `depth_thresh` relaxed from **5 cm → 10 cm**. All other parameters identical to v6.
+
+### v6 (5cm) vs v7 (10cm) comparison
+
+| Object | v6 (5cm) | v7 (10cm) | Δ | Notes |
+| --- | --- | --- | --- | --- |
+| chair_cushion | +6px | **+6px** | 0 | Normal gate bottleneck — depth irrelevant |
+| chair_legs | +2,077px | **+2,542px** | +465px | Slight relaxation |
+| newspaper | +321px | **+321px** | 0 | Normal gate bottleneck |
+| placemat | +127px | **+127px** | 0 | Normal gate bottleneck |
+| round_table_with_tablecloth | +30,315px | **+40,734px** | +10,419px | Largest gain — cloth folds within 10cm |
+| sofa_with_patterned_cover | +5,681px | **+9,153px** | +3,472px | Sofa depth variation fits within 10cm |
+| strainer | +4,094px | **+4,756px** | +662px | Small gain |
+| travel_pillow | +545px | **+1,048px** | +503px | Pillow sides now within threshold |
+| wooden_chair | +2,938px | **+4,331px** | +1,393px | Some chair-frame gaps recovered |
+
+Relaxing to 10cm helps `round_table` (+10K px) and `sofa` (+3.5K px) most. Objects where the normal gate is the bottleneck (`chair_cushion`, `newspaper`, `placemat`) are unchanged.
+
+### v7 Per-Object Visualizations
+
+Images from `output/sam3d_dining_v7/vis/` — panel layout and color legend same as v6 above (in-panel legend visible in each image).
+
+![chair_cushion_mask_growth](../output/sam3d_dining_v7/vis/chair_cushion_mask_growth.png)
+
+![chair_legs_mask_growth](../output/sam3d_dining_v7/vis/chair_legs_mask_growth.png)
+
+![newspaper_mask_growth](../output/sam3d_dining_v7/vis/newspaper_mask_growth.png)
+
+![placemat_mask_growth](../output/sam3d_dining_v7/vis/placemat_mask_growth.png)
+
+![round_table_with_tablecloth_mask_growth](../output/sam3d_dining_v7/vis/round_table_with_tablecloth_mask_growth.png)
+
+![sofa_with_patterned_cover_mask_growth](../output/sam3d_dining_v7/vis/sofa_with_patterned_cover_mask_growth.png)
+
+![strainer_mask_growth](../output/sam3d_dining_v7/vis/strainer_mask_growth.png)
+
+![travel_pillow_mask_growth](../output/sam3d_dining_v7/vis/travel_pillow_mask_growth.png)
+
+![wooden_chair_mask_growth](../output/sam3d_dining_v7/vis/wooden_chair_mask_growth.png)
+
+---
+
 ## What Was Not Isolated
 
 - TRELLIS reconstruction quality impact not measured — visualization only.
-- `depth_thresh=5cm` not ablated — tighter (3cm) or looser (10cm) not tested.
+- `depth_thresh` between 10cm and plane-distance (3cm fixed) not swept further.
 - The depth gate could be combined with the plane-distance (local reference) approach instead of the global-reference normal approach — this might fix the `chair_cushion` failure.
 - `Normal-fail+Depth+ok` pixels are currently discarded; accepting them (depth-only mode as fallback) could recover growth for objects where the global normal reference fails.
 
@@ -131,12 +185,14 @@ Each 4-panel: depth map | normal angle map (green=accepted, red=rejected) | grow
 ## Files
 
 | File | Description |
-|---|---|
-| `visualize_convex_hull_growth.py` | v6 script (current config: `depth_thresh=5cm`, normal+depth) |
-| `output/sam3d_dining_v6/vis/` | v6 mask growth images |
+| --- | --- |
+| `visualize_convex_hull_growth.py` | v7 script (current config: `depth_thresh=10cm`, normal+depth, in-panel legend) |
+| `output/sam3d_dining_v7/vis/` | v7 mask growth images (depth_thresh=10cm) |
+| `output/sam3d_dining_v6/vis/` | v6 mask growth images (depth_thresh=5cm) |
 | `output/sam3d_dining_v5/vis/` | v5 normal-only baseline |
 | `output/sam3d_dining_plane_dist/vis/` | plane-distance baseline |
 
 ### Key Code Changes
 
 - `visualize_convex_hull_growth.py` — `_grow_mask_normal_depth()` replaces previous growth functions; adds `distance_transform_edt` for nearest-neighbor depth lookup; `depth_ok = |depth_P - depth_neighbor| < depth_thresh_m`; visualization panel 3 shows blue = normal-ok but depth-fail pixels
+- v7: `DEPTH_THRESH_M` changed from `0.05` → `0.10`; `matplotlib.patches.Patch` legends added inside each image panel
