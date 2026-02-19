@@ -1,16 +1,21 @@
-"""Visualize convex hull mask growth — Normal-consistency + depth-difference gate.
+"""Visualize convex hull mask growth — Normal-consistency + 8-direction ray depth gate.
 
-Algorithm (v6):
+Algorithm (v9):
   1. Morphological opening (2x erosion + 2x dilation) to clean mask boundary.
   2. Convex hull of cleaned mask.
   3. Per-pixel surface normals from Gaussian-smoothed pointmap (sigma=2.0, ~13x13).
   4. Reference normal = mean of valid normals inside cleaned mask.
   5. Angle deviation map = arccos(|normals · ref|) per pixel.
   6. Adaptive threshold = clip(median + 2*std of angles inside mask, 10°, max_deg).
-  7. EDT nearest cleaned-mask pixel → depth of nearest neighbor.
-  8. Accept hull pixel if:
-       angle < threshold   (normal-consistency)
-       AND |depth_P - depth_neighbor| < depth_thresh_m   (depth gate)
+  7. Precompute ray_first_hit[H, W, 8]: for each pixel and each of 8 directions
+     (N/NE/E/SE/S/SW/W/NW), the depth of the FIRST mask pixel hit along that ray.
+     Cardinal directions: vectorized row/column scan. Diagonals: diagonal scan.
+  8. For each hull pixel P:
+       ray_depths = ray_first_hit[P.r, P.c, :]   # up to 8 values, NaN if no hit
+       [dmin, dmax] = [min(ray_depths), max(ray_depths)]
+  9. Accept hull pixel P if:
+       angle < threshold                      (normal-consistency)
+       AND dmin <= depth[P] <= dmax           (8-dir ray depth range gate)
        AND valid normal
 
 Usage:
@@ -22,8 +27,8 @@ from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.ndimage import (binary_erosion, binary_dilation, gaussian_filter,
-                           distance_transform_edt)
+import matplotlib.patches as mpatches
+from scipy.ndimage import binary_erosion, binary_dilation, gaussian_filter
 from scipy.spatial import ConvexHull
 
 PROJECT_ROOT = Path(__file__).parent
@@ -47,11 +52,11 @@ OBJECTS = [
 
 MASKS_DIR       = PROJECT_ROOT / "output/sam3d_dining_v4"
 MOGE_NPZ        = PROJECT_ROOT / "output/sam3d_dining_v4/target_moge.npz"
-OUTPUT_DIR      = PROJECT_ROOT / "output/sam3d_dining_v6/vis"
+OUTPUT_DIR      = PROJECT_ROOT / "output/sam3d_dining_v9/vis"
 
 SMOOTH_SIGMA    = 2.0   # Gaussian sigma for normal computation (~13x13)
 MAX_ANGLE_DEG   = 60.0  # cap on adaptive normal threshold (degrees)
-DEPTH_THRESH_M  = 0.05  # max depth difference to nearest mask pixel (5 cm)
+# v9 depth gate: 8-direction ray casting — accept P if depth[P] ∈ [min, max] of first hits
 
 # ---------------------------------------------------------------------------
 # Convex hull helper
@@ -99,6 +104,115 @@ def _compute_normals(pointmap: np.ndarray,
     return n.astype(np.float32), valid
 
 # ---------------------------------------------------------------------------
+# 8-direction ray first-hit precomputation
+# ---------------------------------------------------------------------------
+
+def _precompute_ray_first_hit(cleaned: np.ndarray, depth: np.ndarray) -> np.ndarray:
+    """For each pixel (r,c), find depth of first mask pixel in each of 8 directions.
+
+    Returns ray: (H, W, 8) float32. NaN = no mask pixel found in that direction.
+    Direction order: N(0) NE(1) E(2) SE(3) S(4) SW(5) W(6) NW(7).
+
+    Cardinal directions (N/E/S/W): vectorized row/column scan, O(H*W).
+    Diagonal directions (NE/SE/SW/NW): diagonal scan, O(H*W).
+
+    Recurrence for any direction d with unit step (dr, dc):
+      ray[r, c, d] = depth[r, c]             if cleaned[r, c]
+                   = ray[r+dr, c+dc, d]      else (propagate from the d-direction neighbor)
+    Scan in reverse direction (opposite of d) so the neighbor is already computed.
+    """
+    H, W = cleaned.shape
+    mask_dep = np.where(cleaned, depth, np.nan).astype(np.float32)
+    ray = np.full((H, W, 8), np.nan, dtype=np.float32)
+
+    # ---- N (0): dr=-1, dc=0  →  scan top→bottom, propagate downward ----
+    ray[:, :, 0] = mask_dep.copy()
+    for r in range(1, H):
+        nan_r = np.isnan(ray[r, :, 0])
+        ray[r, nan_r, 0] = ray[r - 1, nan_r, 0]
+
+    # ---- S (4): dr=+1, dc=0  →  scan bottom→top, propagate upward ----
+    ray[:, :, 4] = mask_dep.copy()
+    for r in range(H - 2, -1, -1):
+        nan_r = np.isnan(ray[r, :, 4])
+        ray[r, nan_r, 4] = ray[r + 1, nan_r, 4]
+
+    # ---- E (2): dr=0, dc=+1  →  scan right→left, propagate leftward ----
+    ray[:, :, 2] = mask_dep.copy()
+    for c in range(W - 2, -1, -1):
+        nan_c = np.isnan(ray[:, c, 2])
+        ray[nan_c, c, 2] = ray[nan_c, c + 1, 2]
+
+    # ---- W (6): dr=0, dc=-1  →  scan left→right, propagate rightward ----
+    ray[:, :, 6] = mask_dep.copy()
+    for c in range(1, W):
+        nan_c = np.isnan(ray[:, c, 6])
+        ray[nan_c, c, 6] = ray[nan_c, c - 1, 6]
+
+    # ---- NE (1): dr=-1, dc=+1  →  anti-diagonal r+c=k, scan top-right→bottom-left ----
+    ray[:, :, 1] = np.full((H, W), np.nan, dtype=np.float32)
+    for k in range(H + W - 1):
+        c_max = min(W - 1, k)
+        c_min = max(0, k - H + 1)
+        for c in range(c_max, c_min - 1, -1):   # top-right to bottom-left
+            r = k - c
+            if 0 <= r < H:
+                if cleaned[r, c]:
+                    ray[r, c, 1] = depth[r, c]
+                else:
+                    nr, nc = r - 1, c + 1
+                    if 0 <= nr < H and 0 <= nc < W:
+                        ray[r, c, 1] = ray[nr, nc, 1]
+
+    # ---- SW (5): dr=+1, dc=-1  →  anti-diagonal r+c=k, scan bottom-left→top-right ----
+    ray[:, :, 5] = np.full((H, W), np.nan, dtype=np.float32)
+    for k in range(H + W - 1):
+        c_max = min(W - 1, k)
+        c_min = max(0, k - H + 1)
+        for c in range(c_min, c_max + 1):        # bottom-left to top-right
+            r = k - c
+            if 0 <= r < H:
+                if cleaned[r, c]:
+                    ray[r, c, 5] = depth[r, c]
+                else:
+                    nr, nc = r + 1, c - 1
+                    if 0 <= nr < H and 0 <= nc < W:
+                        ray[r, c, 5] = ray[nr, nc, 5]
+
+    # ---- SE (3): dr=+1, dc=+1  →  diagonal r-c=k, scan bottom-right→top-left ----
+    ray[:, :, 3] = np.full((H, W), np.nan, dtype=np.float32)
+    for k in range(-(W - 1), H):
+        r_min = max(0, k)
+        r_max = min(H - 1, W - 1 + k)
+        for r in range(r_max, r_min - 1, -1):   # bottom-right to top-left
+            c = r - k
+            if 0 <= c < W:
+                if cleaned[r, c]:
+                    ray[r, c, 3] = depth[r, c]
+                else:
+                    nr, nc = r + 1, c + 1
+                    if 0 <= nr < H and 0 <= nc < W:
+                        ray[r, c, 3] = ray[nr, nc, 3]
+
+    # ---- NW (7): dr=-1, dc=-1  →  diagonal r-c=k, scan top-left→bottom-right ----
+    ray[:, :, 7] = np.full((H, W), np.nan, dtype=np.float32)
+    for k in range(-(W - 1), H):
+        r_min = max(0, k)
+        r_max = min(H - 1, W - 1 + k)
+        for r in range(r_min, r_max + 1):        # top-left to bottom-right
+            c = r - k
+            if 0 <= c < W:
+                if cleaned[r, c]:
+                    ray[r, c, 7] = depth[r, c]
+                else:
+                    nr, nc = r - 1, c - 1
+                    if 0 <= nr < H and 0 <= nc < W:
+                        ray[r, c, 7] = ray[nr, nc, 7]
+
+    return ray
+
+
+# ---------------------------------------------------------------------------
 # Main growth function
 # ---------------------------------------------------------------------------
 
@@ -110,9 +224,11 @@ def _grow_mask_normal_depth(
     erosion_iters:  int   = 2,
     dilation_iters: int   = 2,
     max_angle_deg:  float = MAX_ANGLE_DEG,
-    depth_thresh_m: float = DEPTH_THRESH_M,
 ) -> tuple:
-    """Grow mask toward convex hull using normal-consistency + depth gate.
+    """Grow mask toward convex hull using normal-consistency + 8-dir ray depth gate.
+
+    Depth gate (v9): cast a ray from P in each of 8 directions; accept P if
+    depth[P] lies within [min, max] of the first mask pixel hit per direction.
 
     Returns
     -------
@@ -120,7 +236,8 @@ def _grow_mask_normal_depth(
     hull_mask    : (H, W) bool
     cleaned      : (H, W) bool
     angle_map    : (H, W) float32  — degrees, NaN outside hull region
-    depth_diff   : (H, W) float32  — |depth_P - depth_neighbor|, NaN outside hull
+    depth_diff   : (H, W) float32  — signed distance outside mask depth range
+                                     (0 = inside range, >0 = out of range)
     normal_ok    : (H, W) bool     — hull pixels passing normal gate
     depth_ok     : (H, W) bool     — hull pixels passing depth gate
     threshold_deg: float           — adaptive angle threshold used
@@ -170,18 +287,28 @@ def _grow_mask_normal_depth(
         10.0, max_angle_deg
     ))
 
-    # 6. EDT: nearest cleaned-mask pixel for each hull pixel
-    _, nearest_idx = distance_transform_edt(~cleaned, return_indices=True)
-    depth_neighbor = depth[nearest_idx[0], nearest_idx[1]]   # (H, W)
+    # 6. Precompute 8-direction ray first-hit depths (once per object)
+    ray_first_hit = _precompute_ray_first_hit(cleaned, depth)  # (H, W, 8)
 
-    # 7. Evaluate gates on growth_region only
-    gr = growth_region
-    angle_map[gr]  = ang[gr]
-    dd = np.abs(depth - depth_neighbor).astype(np.float32)
-    depth_diff[gr] = dd[gr]
+    # 7. For each growth-region pixel, collect 8 ray hits → depth range [dmin, dmax]
+    gr          = growth_region
+    gr_rows, gr_cols = np.where(gr)
+    p_depths    = depth[gr_rows, gr_cols]                       # (M,)
 
+    angle_map[gr] = ang[gr]
     normal_ok[gr] = (ang[gr] < threshold_deg) & valid[gr]
-    depth_ok[gr]  = dd[gr] < depth_thresh_m
+
+    p_ray_hits  = ray_first_hit[gr_rows, gr_cols, :]           # (M, 8)
+    dmin        = np.nanmin(p_ray_hits, axis=1)                 # (M,)
+    dmax        = np.nanmax(p_ray_hits, axis=1)                 # (M,)
+    has_any     = np.isfinite(dmin)                             # at least one direction hit
+
+    # depth_diff: how far P is outside [dmin, dmax]; 0 = inside range
+    dd_vals = (np.clip(dmin - p_depths, 0.0, None) +
+               np.clip(p_depths - dmax, 0.0, None)).astype(np.float32)
+    depth_diff[gr_rows, gr_cols] = dd_vals
+
+    depth_ok[gr_rows, gr_cols] = has_any & (dd_vals == 0.0)
 
     # 8. Accept if both
     accept = normal_ok & depth_ok
@@ -209,57 +336,68 @@ def visualize_mask_growth(
     obj_name:      str,
     output_path:   Path,
 ):
-    """4-panel: depth map | normal angle map | grown mask | angle histogram."""
+    """4-panel: depth+mask | mask+hull | mask+growth | angle histogram."""
     H, W = mask_bool.shape
     eroded_px     = mask_bool & ~cleaned
     growth_region = hull_mask & ~cleaned
+    accepted      = grown & ~cleaned
+    depth_only_fail = normal_ok & ~depth_ok & growth_region
+    net           = int(grown.sum()) - int(mask_bool.sum())
+
+    depth_n = (depth - depth.min()) / (depth.max() - depth.min() + 1e-8)
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 12))
-    fig.suptitle(f"Mask growth (normal + depth gate): {obj_name}",
+    fig.suptitle(f"Mask growth (normal + depth range gate): {obj_name}",
                  fontsize=14, fontweight="bold")
 
-    # --- Panel 1: Depth map ---
+    # --- Top-left: depth map + mask overlay ---
     ax = axes[0, 0]
-    depth_n = (depth - depth.min()) / (depth.max() - depth.min() + 1e-8)
     ax.imshow(depth_n, cmap="gray")
-    ax.set_title("Depth map")
-    ax.axis("off")
-
-    # --- Panel 2: Normal angle map ---
-    ax = axes[0, 1]
-    ax.imshow(depth_n, cmap="gray")
-    disp = np.full((H, W), np.nan, dtype=np.float32)
-    disp[cleaned]        = 0.0
-    disp[growth_region]  = angle_map[growth_region]
-    im = ax.imshow(disp, cmap="RdYlGn_r", vmin=0, vmax=MAX_ANGLE_DEG, alpha=0.75)
-    plt.colorbar(im, ax=ax, fraction=0.03, pad=0.02, label="Angle deviation (°)")
-    mask_edge = cleaned & ~binary_erosion(cleaned, iterations=1)
     ov = np.zeros((H, W, 4), dtype=np.float32)
-    ov[mask_edge] = [0, 1, 0, 1.0]
+    ov[mask_bool] = [0, 0.8, 0.3, 0.5]   # original mask: semi-transparent green
     ax.imshow(ov)
-    ax.set_title(f"Normal angle map  (threshold = {threshold_deg:.1f}°)\n"
-                 "green = within threshold, red = rejected")
+    ax.set_title(f"Depth + original mask ({mask_bool.sum():,}px)")
     ax.axis("off")
+    ax.legend(handles=[
+        mpatches.Patch(color=(0, 0.8, 0.3), alpha=0.5, label=f"Original mask ({mask_bool.sum():,}px)"),
+    ], loc="lower right", fontsize=7, framealpha=0.7)
 
-    # --- Panel 3: Grown mask breakdown ---
+    # --- Top-right: mask + convex hull ---
+    ax = axes[0, 1]
+    vis1 = np.zeros((H, W, 3), dtype=np.uint8)
+    vis1[hull_mask]  = [40, 40, 90]       # hull interior: dark blue
+    vis1[cleaned]    = [0, 180, 80]       # cleaned mask: green
+    vis1[eroded_px]  = [180, 40, 40]      # eroded pixels: red
+    hull_edge = hull_mask & ~binary_erosion(hull_mask, iterations=1)
+    vis1[hull_edge]  = [255, 210, 0]      # hull boundary: yellow
+    ax.imshow(vis1)
+    ax.set_title(f"Mask {cleaned.sum():,}px  Hull {hull_mask.sum():,}px  Eroded -{eroded_px.sum():,}px")
+    ax.axis("off")
+    ax.legend(handles=[
+        mpatches.Patch(color=(0/255, 180/255, 80/255),   label=f"Cleaned mask ({cleaned.sum():,}px)"),
+        mpatches.Patch(color=(40/255, 40/255, 90/255),   label=f"Hull interior ({(hull_mask & ~cleaned).sum():,}px)"),
+        mpatches.Patch(color=(255/255, 210/255, 0/255),  label="Hull boundary edge"),
+        mpatches.Patch(color=(180/255, 40/255, 40/255),  label=f"Eroded -{eroded_px.sum():,}px"),
+    ], loc="lower right", fontsize=7, framealpha=0.7)
+
+    # --- Bottom-left: grown mask ---
     ax = axes[1, 0]
-    vis = np.zeros((H, W, 3), dtype=np.uint8)
-    vis[hull_mask]  = [40, 40, 90]
-    vis[cleaned]    = [0, 180, 80]
-    vis[eroded_px]  = [180, 40, 40]
-    # accepted: both gates pass
-    accepted = grown & ~cleaned
-    vis[accepted]   = [255, 165, 0]
-    # rejected by depth only (normal ok, depth failed)
-    depth_only_fail = normal_ok & ~depth_ok & growth_region
-    vis[depth_only_fail] = [100, 100, 255]
-    ax.imshow(vis)
-    net = int(grown.sum()) - int(mask_bool.sum())
+    vis2 = np.zeros((H, W, 3), dtype=np.uint8)
+    vis2[cleaned]          = [0, 200, 0]     # cleaned mask: green
+    vis2[accepted]         = [255, 165, 0]   # added: orange
+    vis2[eroded_px]        = [140, 30, 30]   # eroded: dark red
+    vis2[depth_only_fail]  = [100, 100, 255] # normal-ok but depth-fail: blue
+    ax.imshow(vis2)
     ax.set_title(
-        f"Grown: +{accepted.sum():,}px (orange)  -eroded {eroded_px.sum():,}px\n"
-        f"Blue = normal-ok but depth-fail ({depth_only_fail.sum():,}px)  Net: {net:+,}px"
+        f"Grown: +{accepted.sum():,}px  -eroded {eroded_px.sum():,}px  Net: {net:+,}px"
     )
     ax.axis("off")
+    ax.legend(handles=[
+        mpatches.Patch(color=(0/255, 200/255, 0/255),    label=f"Cleaned mask ({cleaned.sum():,}px)"),
+        mpatches.Patch(color=(255/255, 165/255, 0/255),  label=f"New growth / accepted (+{accepted.sum():,}px)"),
+        mpatches.Patch(color=(100/255, 100/255, 255/255),label=f"Normal-ok + out-of-range ({depth_only_fail.sum():,}px)"),
+        mpatches.Patch(color=(140/255, 30/255, 30/255),  label=f"Eroded pixels (-{eroded_px.sum():,}px)"),
+    ], loc="lower right", fontsize=7, framealpha=0.7)
 
     # --- Panel 4: Angle histogram ---
     ax = axes[1, 1]
@@ -296,7 +434,7 @@ def main():
     depth    = moge["depth"].astype(np.float32)
     print(f"  Pointmap {pointmap.shape}, depth [{depth.min():.3f}, {depth.max():.3f}]")
     print(f"  smooth_sigma={SMOOTH_SIGMA}  max_angle={MAX_ANGLE_DEG}°  "
-          f"depth_thresh={DEPTH_THRESH_M*100:.0f}cm")
+          f"depth_gate=8-dir-ray")
 
     for name in OBJECTS:
         mask_path = MASKS_DIR / f"{name}.npy"
