@@ -1,9 +1,41 @@
-# SAM3D Dining Scene v6 — Normal-Consistency + Depth-Difference Gate
+# SAM3D Dining Scene — Convex Hull Mask Growth: Depth Gate Variants (v6–v8)
 
 **Date:** 2026-02-18
-**Run:** `output/sam3d_dining_v6/`
 **Scene:** Dining (9 objects)
 **Baseline:** `output/sam3d_dining_v5/` (normal-consistency only, max 60°)
+
+---
+
+## Algorithm Summary: Depth Gate Variants
+
+All versions share the same **normal-consistency** gate (global reference normal, adaptive threshold `clip(median+2σ, 10°, 60°)`, morphological opening 2×erosion+2×dilation). They differ only in the **depth gate**:
+
+| Version | Depth Gate Method | Depth Reference | Threshold |
+|---|---|---|---|
+| **v5** | None | — | — |
+| **v6** | EDT nearest mask pixel depth diff | Single nearest Q (EDT) | 5 cm fixed |
+| **v7** | EDT nearest mask pixel depth diff | Single nearest Q (EDT) | 10 cm fixed |
+| **v8** | KDTree K=60 nearest mask pixels, depth range [dmin, dmax] | All K neighbors | Adaptive (object depth span) |
+
+```python
+# v5 — normal only:
+grown = cleaned | (hull_region & angle < threshold & valid_normal)
+
+# v6/v7 — normal + EDT fixed threshold:
+depth_neighbor  = depth[EDT_nearest_cleaned_pixel(P)]
+depth_ok        = |depth[P] - depth_neighbor| < thresh   # 5cm (v6) / 10cm (v7)
+grown = cleaned | (hull_region & angle < threshold & valid_normal & depth_ok)
+
+# v8 — normal + all-K local depth range:
+Q_depths        = depth[KDTree_K_nearest_mask_pixels(P)]  # K=60
+depth_ok        = min(Q_depths) <= depth[P] <= max(Q_depths)
+grown = cleaned | (hull_region & angle < threshold & valid_normal & depth_ok)
+```
+
+**Key behavioral difference:**
+
+- v6/v7: depth of P vs its single spatially-nearest mask pixel. Fails for large gaps (nearest pixel is far from where P "should" be on the object).
+- v8: depth of P vs the range spanned by its 60 nearest mask pixels. More conservative than v7 for objects where the K nearest pixels are all concentrated near one edge (narrow depth range); looser for compact objects.
 
 ---
 
@@ -173,12 +205,75 @@ Images from `output/sam3d_dining_v7/vis/` — panel layout and color legend same
 
 ---
 
+## v8: All-K Local Depth Range Gate
+
+**Run:** `output/sam3d_dining_v8/`
+**Change:** Replace EDT single-neighbor fixed threshold with KDTree K=60 all-neighbor depth range `[dmin, dmax]`. Accept hull pixel P if `depth[P] ∈ [min(K depths), max(K depths)]`. No fixed threshold — depth gate adapts to local object depth span.
+
+### v7 (10cm) vs v8 (all-K range) comparison
+
+| Object | v7 (10cm) | v8 all-K | Δ | Notes |
+| --- | --- | --- | --- | --- |
+| chair_cushion | +6px | **+6px** | 0 | Normal gate bottleneck — unchanged |
+| chair_legs | +2,542px | **+1,417px** | −1,125px | K=60 nearest all cluster near one edge → narrow range |
+| newspaper | +321px | **+58px** | −263px | Very strict — K neighbors all at table depth |
+| placemat | +127px | **+35px** | −92px | Flat object, K neighbors near one edge |
+| round_table_with_tablecloth | +40,734px | **+16,641px** | −24,093px | Large reduction — cloth fold depth range narrower than 10cm |
+| sofa_with_patterned_cover | +9,153px | **+2,617px** | −6,536px | Most conservative result yet |
+| strainer | +4,756px | **+2,127px** | −2,629px | Compact but K range still narrower than 10cm |
+| travel_pillow | +1,048px | **+396px** | −652px | U-shape — K nearest from one side only |
+| wooden_chair | +4,331px | **+1,730px** | −2,601px | Sparse frame — K nearest from closest slat |
+
+**Key finding:** v8 is **more conservative than even v6 (5cm)** for most objects. The reason: KDTree returns the K=60 spatially-nearest mask pixels, which for sparse/large objects are all clustered near the closest mask edge to P. This edge spans a narrow depth range (e.g., one chair slat), so the [dmin, dmax] gate is tight. The EDT approach (v6/v7) compares against the single nearest pixel but uses a generous fixed threshold; v8 uses many neighbors but they're all from one local area.
+
+For the sector approach (tested between v7 and v8): picking nearest Q per 8 direction sectors forced directional coverage across the object, giving wider [dmin, dmax]. All-K without sectors collapses back to near-edge sampling.
+
+### v8 Per-Object Visualizations
+
+Images from `output/sam3d_dining_v8/vis/`.
+
+![chair_cushion_mask_growth](test_results_images/sam3d_dining_v8/chair_cushion_mask_growth.png)
+
+![chair_legs_mask_growth](test_results_images/sam3d_dining_v8/chair_legs_mask_growth.png)
+
+![newspaper_mask_growth](test_results_images/sam3d_dining_v8/newspaper_mask_growth.png)
+
+![placemat_mask_growth](test_results_images/sam3d_dining_v8/placemat_mask_growth.png)
+
+![round_table_with_tablecloth_mask_growth](test_results_images/sam3d_dining_v8/round_table_with_tablecloth_mask_growth.png)
+
+![sofa_with_patterned_cover_mask_growth](test_results_images/sam3d_dining_v8/sofa_with_patterned_cover_mask_growth.png)
+
+![strainer_mask_growth](test_results_images/sam3d_dining_v8/strainer_mask_growth.png)
+
+![travel_pillow_mask_growth](test_results_images/sam3d_dining_v8/travel_pillow_mask_growth.png)
+
+![wooden_chair_mask_growth](test_results_images/sam3d_dining_v8/wooden_chair_mask_growth.png)
+
+---
+
+## Full Algorithm Comparison (all methods, dining scene)
+
+| Object | v5 Normal-only | v6 (5cm EDT) | v7 (10cm EDT) | v8 (all-K range) | Plane-Dist | RANSAC v2 |
+| --- | --- | --- | --- | --- | --- | --- |
+| chair_cushion | +6px | +6px | +6px | **+6px** | +6,436px | +4,413px |
+| chair_legs | +33,530px | +2,077px | +2,542px | **+1,417px** | +35,300px | +8,960px |
+| newspaper | +4,041px | +321px | +321px | **+58px** | +389px | +389px |
+| placemat | +168px | +127px | +127px | **+35px** | +1,187px | +375px |
+| round_table | +48,088px | +30,315px | +40,734px | **+16,641px** | +45,143px | +22,111px |
+| sofa | +30,072px | +5,681px | +9,153px | **+2,617px** | +36,710px | +11,287px |
+| strainer | +4,823px | +4,094px | +4,756px | **+2,127px** | +4,922px | +3,544px |
+| travel_pillow | +1,745px | +545px | +1,048px | **+396px** | +2,509px | +1,887px |
+| wooden_chair | +22,795px | +2,938px | +4,331px | **+1,730px** | +23,945px | +14,955px |
+
+---
+
 ## What Was Not Isolated
 
 - TRELLIS reconstruction quality impact not measured — visualization only.
-- `depth_thresh` between 10cm and plane-distance (3cm fixed) not swept further.
-- The depth gate could be combined with the plane-distance (local reference) approach instead of the global-reference normal approach — this might fix the `chair_cushion` failure.
-- `Normal-fail+Depth+ok` pixels are currently discarded; accepting them (depth-only mode as fallback) could recover growth for objects where the global normal reference fails.
+- v8 is more conservative than expected. A **sector-constrained all-K** approach (pick nearest Q per 8 sectors, then union all their depths) could give a wider, more accurate object-spanning depth range.
+- The depth gate could be combined with the plane-distance (local reference) approach — this might fix `chair_cushion`.
+- `Normal-fail+Depth+ok` pixels are currently discarded; depth-only fallback could recover growth where global normal reference fails.
 
 ---
 
@@ -186,13 +281,15 @@ Images from `output/sam3d_dining_v7/vis/` — panel layout and color legend same
 
 | File | Description |
 | --- | --- |
-| `visualize_convex_hull_growth.py` | v7 script (current config: `depth_thresh=10cm`, normal+depth, in-panel legend) |
-| `output/sam3d_dining_v7/vis/` | v7 mask growth images (depth_thresh=10cm) |
-| `output/sam3d_dining_v6/vis/` | v6 mask growth images (depth_thresh=5cm) |
+| `visualize_convex_hull_growth.py` | Current script (v8: all-K local depth range, K=60) |
+| `output/sam3d_dining_v8/vis/` | v8 mask growth images |
+| `output/sam3d_dining_v7/vis/` | v7 mask growth images (10cm EDT) |
+| `output/sam3d_dining_v6/vis/` | v6 mask growth images (5cm EDT) |
 | `output/sam3d_dining_v5/vis/` | v5 normal-only baseline |
 | `output/sam3d_dining_plane_dist/vis/` | plane-distance baseline |
 
 ### Key Code Changes
 
-- `visualize_convex_hull_growth.py` — `_grow_mask_normal_depth()` replaces previous growth functions; adds `distance_transform_edt` for nearest-neighbor depth lookup; `depth_ok = |depth_P - depth_neighbor| < depth_thresh_m`; visualization panel 3 shows blue = normal-ok but depth-fail pixels
-- v7: `DEPTH_THRESH_M` changed from `0.05` → `0.10`; `matplotlib.patches.Patch` legends added inside each image panel
+- **v6**: `_grow_mask_normal_depth()` — `distance_transform_edt` nearest-neighbor depth lookup; `depth_ok = |depth_P - depth_neighbor| < 0.05`
+- **v7**: `DEPTH_THRESH_M` relaxed `0.05 → 0.10`; `matplotlib.patches.Patch` in-panel legends added
+- **v8**: EDT replaced with `cKDTree.query(gr_xy, k=60)`; depth gate = `q_dep_all.min() <= depth_P <= q_dep_all.max()` over all 60 neighbors; sector loop removed
