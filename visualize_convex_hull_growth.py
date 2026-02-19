@@ -1,15 +1,18 @@
-"""Visualize convex hull mask growth for greentea scene objects.
+"""Visualize convex hull mask growth — local plane-distance consistency.
 
-Generates 4-panel diagnostic for each object:
-  - Normal deviation angle map (blue=coplanar, red=different surface)
-  - Original SAM mask + convex hull outline
-  - Grown mask (original green, added orange)
-  - Normal angle deviation histogram with threshold line
+Algorithm (v4):
+  1. Morphological opening (2x erosion + 2x dilation) to clean mask boundary.
+  2. Compute convex hull of cleaned mask.
+  3. For each hull pixel, find nearest cleaned-mask pixel via EDT.
+  4. Accept pixel if |dot(normal_n, pos_candidate - pos_n)| < threshold_m
+     AND the neighbor has a valid normal.
+  5. Direct assignment: all accepted hull pixels join the mask at once.
 
-Uses local surface normal consistency instead of Sobel depth edges:
-  - Compute per-pixel normals from 3D pointmap via central differences
-  - Reference normal = mean of normals inside original mask
-  - Allow growth where normal angle deviation < adaptive threshold (median + k*sigma)
+4-panel output per object:
+  - Plane distance map (0=coplanar/green, red=far from surface)
+  - Original mask + cleaned mask + hull outline
+  - Grown mask (cleaned=green, added=orange, eroded=red)
+  - Plane distance histogram for growth region
 
 Usage:
     python visualize_convex_hull_growth.py
@@ -20,7 +23,10 @@ from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.ndimage import binary_erosion, gaussian_filter
+from scipy.ndimage import (
+    binary_erosion, binary_dilation,
+    distance_transform_edt, gaussian_filter,
+)
 from scipy.spatial import ConvexHull
 
 PROJECT_ROOT = Path(__file__).parent
@@ -42,9 +48,12 @@ OBJECTS = [
     "wooden_chair",
 ]
 
-MASKS_DIR  = PROJECT_ROOT / "output/sam3d_dining_v4"
-MOGE_NPZ   = PROJECT_ROOT / "output/sam3d_dining_v4/target_moge.npz"
-OUTPUT_DIR = PROJECT_ROOT / "output/sam3d_dining_v5/vis"
+MASKS_DIR   = PROJECT_ROOT / "output/sam3d_dining_v4"
+MOGE_NPZ    = PROJECT_ROOT / "output/sam3d_dining_v4/target_moge.npz"
+OUTPUT_DIR  = PROJECT_ROOT / "output/sam3d_dining_plane_dist/vis"
+
+THRESHOLD_M  = 0.03   # plane-distance acceptance threshold (meters)
+SMOOTH_SIGMA = 2.0    # Gaussian sigma for normal computation (~13×13 window)
 
 # ---------------------------------------------------------------------------
 # Convex hull helper
@@ -60,220 +69,195 @@ def _make_convex_hull_mask(mask_bool: np.ndarray) -> np.ndarray:
     except Exception:
         return mask_bool.copy()
     from matplotlib.path import Path as MplPath
-    hull_pts = points_2d[hull.vertices]
+    hull_pts  = points_2d[hull.vertices]
     hull_path = MplPath(hull_pts)
     H, W = mask_bool.shape
     rmin, rmax = max(0, rows.min() - 2), min(H - 1, rows.max() + 2)
     cmin, cmax = max(0, cols.min() - 2), min(W - 1, cols.max() + 2)
     yy, xx = np.mgrid[rmin:rmax+1, cmin:cmax+1]
-    test_pts = np.column_stack([xx.ravel(), yy.ravel()])
-    inside = hull_path.contains_points(test_pts).reshape(yy.shape)
+    inside = hull_path.contains_points(
+        np.column_stack([xx.ravel(), yy.ravel()])
+    ).reshape(yy.shape)
     hull_mask = np.zeros_like(mask_bool)
     hull_mask[rmin:rmax+1, cmin:cmax+1] = inside
     return hull_mask
 
 # ---------------------------------------------------------------------------
-# Normal-based mask growth
+# Normal computation
 # ---------------------------------------------------------------------------
 
 def _compute_local_normals(
-    pointmap: np.ndarray,   # (H, W, 3)
-    smooth_sigma: float = 2.0,
+    pointmap: np.ndarray,    # (H, W, 3)
+    smooth_sigma: float = SMOOTH_SIGMA,
 ) -> np.ndarray:
-    """Per-pixel surface normals via central differences on the 3D point map.
+    """Per-pixel surface normals via central differences on Gaussian-smoothed pointmap.
 
-    Optionally Gaussian-smooths the pointmap first to reduce noise.
-    Returns (H, W, 3) unit normals; zero vector at invalid pixels.
+    Returns (H, W, 3) unit normals; zero vector at degenerate pixels.
     """
-    pm = gaussian_filter(pointmap.astype(np.float32), sigma=[smooth_sigma, smooth_sigma, 0])
-
-    # Tangents: central differences
+    pm = gaussian_filter(pointmap.astype(np.float32),
+                         sigma=[smooth_sigma, smooth_sigma, 0])
     dx = np.zeros_like(pm)
     dy = np.zeros_like(pm)
     dx[:, 1:-1] = pm[:, 2:] - pm[:, :-2]
     dy[1:-1, :] = pm[2:, :] - pm[:-2, :]
-
-    # Normal = cross(dx, dy)
-    normals = np.cross(dx, dy)          # (H, W, 3)
-
-    # Normalize; zero out degenerate pixels
-    norms = np.linalg.norm(normals, axis=-1, keepdims=True)
-    valid = norms[..., 0] > 1e-10
-    normals[valid] /= norms[valid]
-    normals[~valid] = 0.0
+    normals = np.cross(dx, dy)
+    norms   = np.linalg.norm(normals, axis=-1, keepdims=True)
+    valid   = norms[..., 0] > 1e-10
+    normals[valid]  /= norms[valid]
+    normals[~valid]  = 0.0
     return normals.astype(np.float32)
 
+# ---------------------------------------------------------------------------
+# Mask growth — local plane distance
+# ---------------------------------------------------------------------------
 
-def _grow_mask_normal_consistency(
-    mask_bool: np.ndarray,    # (H, W) bool
-    pointmap: np.ndarray,     # (H, W, 3) float  — MoGe 3D points
-    k_sigma: float = 2.0,
-    min_threshold_deg: float = 10.0,
-    max_threshold_deg: float = 60.0,
-    smooth_sigma: float = 2.0,
-) -> tuple[np.ndarray, np.ndarray, float, np.ndarray, np.ndarray]:
-    """Grow mask toward convex hull using surface normal consistency.
+def _grow_mask_plane_distance(
+    mask_bool:    np.ndarray,   # (H, W) bool  — original SAM mask
+    pointmap:     np.ndarray,   # (H, W, 3)    — MoGe 3D point map
+    threshold_m:  float = THRESHOLD_M,
+    smooth_sigma: float = SMOOTH_SIGMA,
+    erosion_iters:  int = 2,
+    dilation_iters: int = 2,
+) -> tuple:
+    """Grow mask toward convex hull using local surface plane consistency.
 
-    Algorithm:
-    1. Compute per-pixel surface normals from the 3D pointmap (central diffs).
-    2. Reference normal = mean of valid normals inside the original mask.
-    3. Angle deviation map = arccos(|normals · ref|) for every pixel.
-    4. Adaptive threshold = median + k_sigma * std of angles inside mask,
-       clamped to [min_threshold_deg, max_threshold_deg].
-    5. All hull pixels with angle < threshold AND valid normal join the mask
-       (direct assignment — no connectivity requirement).
-
-    max_threshold_deg=60 handles curved surfaces (bottles etc.) while still
-    stopping at genuine surface boundaries (table, background walls ≥ 70°
-    from object normals).
+    Steps
+    -----
+    1. Morphological opening (erosion_iters + dilation_iters) to remove
+       noisy boundary protrusions.
+    2. Convex hull of the cleaned mask.
+    3. EDT: for every pixel find its nearest cleaned-mask pixel (r_n, c_n).
+    4. Plane distance = |dot(normal_n, pos_candidate - pos_n)|.
+       Accept hull pixels where plane_dist < threshold_m AND normal_n valid.
+    5. Direct assignment: grown = cleaned | accepted_hull_pixels.
 
     Returns
     -------
-    grown_mask    : (H, W) bool
-    hull_mask     : (H, W) bool
-    threshold_rad : adaptive threshold in radians
-    normals       : (H, W, 3) computed unit normals
-    angle_map     : (H, W) per-pixel angle deviation from reference (radians)
+    grown_mask   : (H, W) bool
+    hull_mask    : (H, W) bool  — convex hull of cleaned mask
+    cleaned_mask : (H, W) bool  — morphologically-opened mask
+    plane_dist   : (H, W) float — plane distance map (meters)
+    threshold_m  : float
     """
-    hull_mask = _make_convex_hull_mask(mask_bool)
+    # 1. Morphological opening
+    cleaned = mask_bool.copy()
+    if mask_bool.sum() > 50:
+        eroded = binary_erosion(mask_bool, iterations=erosion_iters)
+        if eroded.sum() >= 10:
+            cleaned = binary_dilation(eroded, iterations=dilation_iters)
+        # else: mask too small to erode — keep original
 
-    # --- Compute normals ---
-    normals = _compute_local_normals(pointmap, smooth_sigma=smooth_sigma)
+    # 2. Convex hull of cleaned mask
+    hull_mask = _make_convex_hull_mask(cleaned)
 
-    # --- Reference normal: mean of valid normals inside original mask ---
-    normal_valid_map = np.linalg.norm(normals, axis=-1) > 0.5   # (H, W)
-    normals_in_mask = normals[mask_bool & normal_valid_map]
+    # 3. Normals
+    normals      = _compute_local_normals(pointmap, smooth_sigma=smooth_sigma)
+    normal_valid = np.linalg.norm(normals, axis=-1) > 0.5   # (H, W)
 
-    if len(normals_in_mask) < 10:
-        # Fallback: no growth
-        angle_map = np.zeros(mask_bool.shape, dtype=np.float32)
-        return mask_bool.copy(), hull_mask, 0.0, normals, angle_map
+    # 4. EDT — nearest cleaned-mask pixel for every pixel in the image
+    _, nearest_idx = distance_transform_edt(~cleaned, return_indices=True)
+    nn_r, nn_c = nearest_idx[0], nearest_idx[1]             # (H, W) each
 
-    ref_normal = normals_in_mask.mean(axis=0)
-    ref_norm = np.linalg.norm(ref_normal)
-    if ref_norm < 1e-8:
-        angle_map = np.zeros(mask_bool.shape, dtype=np.float32)
-        return mask_bool.copy(), hull_mask, 0.0, normals, angle_map
-    ref_normal /= ref_norm
+    pos_neighbor   = pointmap[nn_r, nn_c]                   # (H, W, 3)
+    norm_neighbor  = normals[nn_r, nn_c]                    # (H, W, 3)
+    valid_neighbor = normal_valid[nn_r, nn_c]               # (H, W)
 
-    # --- Angle deviation map ---
-    # Use |dot| to handle sign ambiguity (normals can point inward or outward)
-    dot = np.clip(np.abs(normals @ ref_normal), 0.0, 1.0)   # (H, W)
-    angle_map = np.arccos(dot).astype(np.float32)            # (H, W) radians
+    delta      = pointmap - pos_neighbor                    # (H, W, 3)
+    plane_dist = np.abs(np.sum(norm_neighbor * delta, axis=-1)).astype(np.float32)
 
-    # --- Adaptive threshold from angles inside original mask ---
-    angles_in_mask = angle_map[mask_bool & normal_valid_map]
-    threshold_rad = float(np.median(angles_in_mask)) + k_sigma * float(np.std(angles_in_mask))
-    threshold_rad = float(np.clip(
-        threshold_rad,
-        np.radians(min_threshold_deg),
-        np.radians(max_threshold_deg),
-    ))
+    # 5. Accept & assign
+    growth_region = hull_mask & ~cleaned
+    safe  = growth_region & (plane_dist < threshold_m) & valid_neighbor
+    grown = cleaned | safe
 
-    # --- Safe growth pixels: hull region, consistent normal, valid normal ---
-    growth_region = hull_mask & ~mask_bool
-    safe_pixels = growth_region & (angle_map < threshold_rad) & normal_valid_map
-
-    # --- Direct assignment (no connectivity constraint) ---
-    # Iterative connected dilation fails when depth-discontinuity pixels at the
-    # mask border form a high-deviation "ring", blocking access to safe interior
-    # pixels.  Direct assignment avoids this: any hull pixel with consistent
-    # normals joins the mask regardless of connectivity.
-    grown = mask_bool | safe_pixels
-
-    return grown, hull_mask, threshold_rad, normals, angle_map
+    return grown, hull_mask, cleaned, plane_dist, threshold_m
 
 # ---------------------------------------------------------------------------
 # Visualization
 # ---------------------------------------------------------------------------
 
 def visualize_mask_growth(
-    mask_bool: np.ndarray,
-    grown_mask: np.ndarray,
-    hull_mask: np.ndarray,
-    depth: np.ndarray,
-    angle_map: np.ndarray,     # (H, W) angle deviation in radians
-    threshold_rad: float,
-    obj_name: str,
-    output_path: Path,
+    mask_bool:    np.ndarray,
+    grown_mask:   np.ndarray,
+    hull_mask:    np.ndarray,
+    cleaned_mask: np.ndarray,
+    depth:        np.ndarray,
+    plane_dist:   np.ndarray,   # (H, W) meters
+    threshold_m:  float,
+    obj_name:     str,
+    output_path:  Path,
 ):
-    """4-panel: normal deviation map | original+hull | grown mask | angle histogram."""
+    """4-panel diagnostic: plane-dist map | masks+hull | grown | histogram."""
     H, W = mask_bool.shape
-    threshold_deg = np.degrees(threshold_rad)
+    growth_region = hull_mask & ~cleaned_mask
+    eroded_px     = mask_bool & ~cleaned_mask
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 12))
-    fig.suptitle(f"Mask Growth (normal consistency): {obj_name}",
-                 fontsize=14, fontweight="bold")
+    fig.suptitle(f"Mask growth (plane distance): {obj_name}", fontsize=14,
+                 fontweight="bold")
 
-    # --- Panel 1: Normal angle deviation map ---
+    # --- Panel 1: Plane distance map ---
     ax = axes[0, 0]
-    # Background: depth map (grayscale)
-    ax.imshow(depth, cmap="gray", vmin=depth.min(), vmax=depth.max())
-    # Overlay: angle deviation colormap (masked to hull region + original mask)
-    show_region = hull_mask | mask_bool
-    angle_display = np.full((H, W), np.nan, dtype=np.float32)
-    angle_display[show_region] = np.degrees(angle_map[show_region])
-    im = ax.imshow(angle_display, cmap="RdYlGn_r", vmin=0, vmax=60, alpha=0.75)
-    plt.colorbar(im, ax=ax, fraction=0.03, pad=0.02, label="Normal deviation (°)")
-    # Red contour where angle >= threshold
-    above = show_region & (angle_map >= threshold_rad)
-    above_overlay = np.zeros((H, W, 4), dtype=np.float32)
-    above_overlay[above] = [1, 0, 0, 0.45]
-    ax.imshow(above_overlay)
-    # Mask outline
-    mask_edge = mask_bool & ~binary_erosion(mask_bool, iterations=1)
-    edge_overlay = np.zeros((H, W, 4), dtype=np.float32)
-    edge_overlay[mask_edge] = [0, 1, 0, 1.0]
-    ax.imshow(edge_overlay)
-    ax.set_title(f"Normal deviation (green=mask outline, red=>{threshold_deg:.1f}°)")
+    depth_norm = (depth - depth.min()) / (depth.max() - depth.min() + 1e-8)
+    ax.imshow(depth_norm, cmap="gray")
+
+    disp = np.full((H, W), np.nan, dtype=np.float32)
+    disp[cleaned_mask]   = 0.0                         # mask itself → 0
+    disp[growth_region]  = plane_dist[growth_region]   # hull gap → actual dist
+    vmax = max(threshold_m * 4, 0.001)
+    im = ax.imshow(disp, cmap="RdYlGn_r", vmin=0, vmax=vmax, alpha=0.75)
+    plt.colorbar(im, ax=ax, fraction=0.03, pad=0.02, label="Plane dist (m)")
+
+    # Mask boundary outline
+    mask_edge = cleaned_mask & ~binary_erosion(cleaned_mask, iterations=1)
+    edge_ov   = np.zeros((H, W, 4), dtype=np.float32)
+    edge_ov[mask_edge] = [0, 1, 0, 1.0]
+    ax.imshow(edge_ov)
+    ax.set_title(f"Plane distance map  threshold={threshold_m*100:.1f} cm"
+                 f"\n(green outline = cleaned mask)")
     ax.axis("off")
 
-    # --- Panel 2: Original mask + convex hull ---
+    # --- Panel 2: Original + cleaned + hull ---
     ax = axes[0, 1]
-    vis = np.zeros((H, W, 3), dtype=np.uint8)
-    vis[hull_mask] = [60, 60, 100]
-    vis[mask_bool] = [0, 200, 0]
+    vis1 = np.zeros((H, W, 3), dtype=np.uint8)
+    vis1[hull_mask]    = [40, 40, 90]      # hull fill: dark blue
+    vis1[cleaned_mask] = [0, 180, 80]      # cleaned mask: green
+    vis1[eroded_px]    = [180, 40, 40]     # eroded-away pixels: red
     hull_edge = hull_mask & ~binary_erosion(hull_mask, iterations=1)
-    vis[hull_edge] = [255, 255, 0]
-    ax.imshow(vis)
-    n_orig = int(mask_bool.sum())
-    n_hull = int(hull_mask.sum())
-    ax.set_title(f"Original mask ({n_orig:,}px) + Convex hull ({n_hull:,}px)")
+    vis1[hull_edge] = [255, 210, 0]        # hull boundary: yellow
+    ax.imshow(vis1)
+    ax.set_title(f"Orig {mask_bool.sum():,}px → Cleaned {cleaned_mask.sum():,}px"
+                 f"  (red=eroded -{eroded_px.sum():,}px)\n"
+                 f"Hull {hull_mask.sum():,}px (yellow)")
     ax.axis("off")
 
     # --- Panel 3: Grown mask ---
     ax = axes[1, 0]
     vis2 = np.zeros((H, W, 3), dtype=np.uint8)
-    vis2[grown_mask] = [0, 150, 200]
-    vis2[mask_bool] = [0, 200, 0]
-    added = grown_mask & ~mask_bool
-    vis2[added] = [255, 165, 0]
+    vis2[cleaned_mask] = [0, 200, 0]       # cleaned: green
+    added = grown_mask & ~cleaned_mask
+    vis2[added]        = [255, 165, 0]     # newly added: orange
+    vis2[eroded_px]    = [140, 30, 30]     # eroded: dark red
     ax.imshow(vis2)
-    n_grown = int(grown_mask.sum())
-    n_added = int(added.sum())
-    ax.set_title(f"Grown mask ({n_grown:,}px, +{n_added:,} added)")
+    ax.set_title(f"Grown: +{added.sum():,} added (orange)  "
+                 f"-{eroded_px.sum():,} eroded (red)\n"
+                 f"Net vs original: {int(grown_mask.sum()) - int(mask_bool.sum()):+,}px")
     ax.axis("off")
 
-    # --- Panel 4: Angle deviation histogram ---
+    # --- Panel 4: Plane distance histogram (growth region) ---
     ax = axes[1, 1]
-    normal_valid_map = np.linalg.norm  # placeholder — recompute from angle_map shape
-    # Use angle_map directly; filter by pixels where we have valid normals (angle != 0 or mask px)
-    angles_in_mask   = np.degrees(angle_map[mask_bool])
-    growth_region    = hull_mask & ~mask_bool
-    angles_in_growth = np.degrees(angle_map[growth_region])
-    if len(angles_in_mask) > 0:
-        ax.hist(angles_in_mask, bins=90, range=(0, 90), alpha=0.7, color="green",
-                label="Inside mask", density=True)
-    if len(angles_in_growth) > 0:
-        ax.hist(angles_in_growth, bins=90, range=(0, 90), alpha=0.5, color="orange",
-                label="Growth region", density=True)
-    ax.axvline(threshold_deg, color="red", ls="--", lw=2,
-               label=f"Threshold={threshold_deg:.1f}°")
-    ax.set_xlabel("Normal deviation angle (°)")
+    growth_dists = plane_dist[growth_region]
+    if len(growth_dists) > 0:
+        vmax_h = max(threshold_m * 5, 0.001)
+        ax.hist(growth_dists, bins=80, range=(0, vmax_h),
+                color="orange", alpha=0.8,
+                label=f"Growth region ({len(growth_dists):,}px)", density=True)
+    ax.axvline(threshold_m, color="red", ls="--", lw=2,
+               label=f"Threshold = {threshold_m*100:.1f} cm")
+    ax.set_xlabel("Plane distance (m)")
     ax.set_ylabel("Density")
-    ax.set_title("Normal angle distribution")
+    ax.set_title("Plane distance distribution — growth region")
     ax.legend(fontsize=8)
-    ax.set_xlim(0, min(threshold_deg * 4, 90))
 
     plt.tight_layout()
     fig.savefig(str(output_path), dpi=120, bbox_inches="tight")
@@ -289,12 +273,11 @@ def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     print(f"Loading MoGe data: {MOGE_NPZ}")
-    moge = np.load(str(MOGE_NPZ))
-    print(f"  Keys: {list(moge.keys())}")
-
-    pointmap = moge["points"].astype(np.float32)   # (H, W, 3) — 3D positions
-    depth    = moge["depth"].astype(np.float32)    # (H, W)    — metric depth for display
-    print(f"  Pointmap shape={pointmap.shape}, depth range=[{depth.min():.3f}, {depth.max():.3f}]")
+    moge     = np.load(str(MOGE_NPZ))
+    pointmap = moge["points"].astype(np.float32)
+    depth    = moge["depth"].astype(np.float32)
+    print(f"  Pointmap shape={pointmap.shape}, depth [{depth.min():.3f}, {depth.max():.3f}]")
+    print(f"  threshold_m={THRESHOLD_M*100:.1f}cm  smooth_sigma={SMOOTH_SIGMA}")
 
     for name in OBJECTS:
         mask_path = MASKS_DIR / f"{name}.npy"
@@ -306,24 +289,28 @@ def main():
         mask_bool = np.load(str(mask_path)).astype(bool)
 
         if mask_bool.shape != depth.shape:
-            print(f"  WARNING: mask shape {mask_bool.shape} != pointmap {depth.shape}")
+            print(f"  WARNING: shape mismatch {mask_bool.shape} vs {depth.shape}")
             continue
 
-        n_px  = int(mask_bool.sum())
-        n_tot = mask_bool.size
-        print(f"  Mask: {n_px:,} / {n_tot:,} px ({100.*n_px/n_tot:.1f}%)")
+        n_px = int(mask_bool.sum())
+        print(f"  Mask: {n_px:,} / {mask_bool.size:,} px ({100.*n_px/mask_bool.size:.1f}%)")
 
-        grown_mask, hull_mask, threshold_rad, normals, angle_map = \
-            _grow_mask_normal_consistency(mask_bool, pointmap)
+        grown, hull_mask, cleaned, plane_dist, thr = \
+            _grow_mask_plane_distance(mask_bool, pointmap)
 
-        n_added = int((grown_mask & ~mask_bool).sum())
-        print(f"  Hull: {hull_mask.sum():,}px | Grown: +{n_added:,}px "
-              f"| threshold={np.degrees(threshold_rad):.1f}°")
+        n_eroded = int((mask_bool & ~cleaned).sum())
+        n_added  = int((grown & ~cleaned).sum())
+        net      = int(grown.sum()) - int(mask_bool.sum())
+        print(f"  Hull: {hull_mask.sum():,}px | "
+              f"Eroded: -{n_eroded:,}px | "
+              f"Added: +{n_added:,}px | "
+              f"Net: {net:+,}px | "
+              f"threshold={thr*100:.1f}cm")
 
         out_path = OUTPUT_DIR / f"{name}_mask_growth.png"
         visualize_mask_growth(
-            mask_bool, grown_mask, hull_mask, depth,
-            angle_map, threshold_rad, name, out_path,
+            mask_bool, grown, hull_mask, cleaned, depth,
+            plane_dist, thr, name, out_path,
         )
 
     print("\nDone.")
