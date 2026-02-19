@@ -118,6 +118,8 @@ There is **no separate camera pose estimation**. The camera is implicitly at the
 
 MoGe is called once for the full scene image. The pointmap is then used in Steps 4 and 5 for pose estimation and alignment.
 
+**Why `--scene-image` was needed despite MoGe already using the full image:** In the original pipeline, the Step 5 `Point_Map` was not taken directly from MoGe. It came from the sparse structure preprocessor's `rgb_pointmap`, which SSI-normalizes the pointmap using the per-object mask region. For small objects (< 5% of image pixels), SSI produced `scale ≈ 0`, causing NaN on inverse normalization. The `--scene-image` flag bypasses SSI entirely by forwarding the raw MoGe pointmap (`pipeline_pointmap`) straight to `run_post_optimization`.
+
 ### Where intrinsics are used
 
 The intrinsics from Step 2 are the **single source of camera calibration for the entire pipeline**. They flow directly to the layout post-optimization:
@@ -291,7 +293,7 @@ Aligns the mesh to the MoGe pointmap within the object's mask:
        return original_trellis_pose, iou=-1
    ```
 
-   This was the failure mode for all 5 objects before the scene-image MoGe fix. Per-object masked images (mostly black) caused MoGe to output NaN pointmaps, making every pixel invalid. With `--scene-image` (full scene passed to MoGe), `flag_notgt` is now almost always False.
+   This was the failure mode for all 5 objects before the `--scene-image` fix. MoGe always ran on the full scene image — the NaN was NOT from MoGe. It came from SSI (ScaleShiftInvariant) normalization in the sparse structure preprocessor: the full-scene pointmap was cropped to the object bounding box, resized to 518×518, then SSI-normalized using the per-object mask region. For small objects (mask < 5% of image), the mask region had near-zero variance → `scale ≈ 0` → inverse normalization (`_apply_metric_to_ssi(..., apply_inverse=True)`) produced NaN/inf. The `--scene-image` fix bypasses the SSI chain entirely by passing the raw MoGe pointmap directly, making `flag_notgt` almost always False.
 
 **Space:** 3D camera space (PyTorch3D convention: X-left, Y-up, Z-forward)
 **Target:** Masked MoGe pointmap (only pixels within the object mask, with depth outlier filtering)
