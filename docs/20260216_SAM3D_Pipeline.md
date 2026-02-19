@@ -118,6 +118,32 @@ There is **no separate camera pose estimation**. The camera is implicitly at the
 
 MoGe is called once for the full scene image. The pointmap is then used in Steps 4 and 5 for pose estimation and alignment.
 
+### Where intrinsics are used
+
+The intrinsics from Step 2 are the **single source of camera calibration for the entire pipeline**. They flow directly to the layout post-optimization:
+
+```python
+# inference_pipeline_pointmap.py:460
+run_post_optimization(
+    pipeline_pointmap=pointmap,
+    intrinsics=pointmap_dict["intrinsics"],   # <-- from Step 2
+    ...
+)
+```
+
+Inside Stage 5c, they are used to construct `PerspectiveCameras` for differentiable silhouette rendering (`layout_post_optimization_utils.py:141-151`):
+
+```python
+cameras = PerspectiveCameras(
+    focal_length=((fx, fy),),
+    principal_point=((cx, cy),),
+    image_size=((H, W),),
+    device=device,
+)
+```
+
+There is no ground-truth camera calibration input. MoGe's estimate is authoritative for all downstream stages. If MoGe's intrinsics are wrong, the silhouette renderer in Stage 5c will project the mesh incorrectly, affecting alignment quality.
+
 ---
 
 ## Step 3: TRELLIS 3D Reconstruction
