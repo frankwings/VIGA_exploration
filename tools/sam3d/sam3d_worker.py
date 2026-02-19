@@ -161,14 +161,30 @@ def main() -> None:
     p.add_argument("--glb", required=True, help="Path for output GLB file")
     p.add_argument("--info", required=False, help="Path to save JSON output (instead of stdout)")
     p.add_argument("--scene-image", required=False, help="Path to full scene image for MoGe depth (avoids NaN on dark per-object images)")
+    p.add_argument("--checkpoint", required=False, help="Save raw TRELLIS checkpoint .npz (mesh + original pose + intrinsics + mask + pointmap) for replay_post_opt.py")
     args = p.parse_args()
 
     inference = Inference(args.config, compile=False)
+
+    # Capture dict populated by the wrapper below (populated before post-opt runs).
+    _ckpt: dict = {}
 
     # Enable layout post-optimization with LAZY import to avoid VRAM conflict.
     # pytorch3d import (required by post-opt) allocates CUDA memory; deferring
     # the import until post-opt runs keeps VRAM free for TRELLIS model inference.
     def _lazy_layout_post_opt(*a, **kw):
+        # a = (Mesh, Quaternion, Translation, Scale, Mask, Point_Map, Intrinsics, ...)
+        if args.checkpoint:
+            def _np(x):
+                if hasattr(x, "cpu"):
+                    return x.cpu().detach().float().numpy()
+                return np.array(x, dtype=np.float32)
+            _ckpt["rotation"]    = _np(a[1])
+            _ckpt["translation"] = _np(a[2])
+            _ckpt["scale"]       = _np(a[3])
+            _ckpt["mask"]        = _np(a[4])
+            _ckpt["point_map"]   = _np(a[5])
+            _ckpt["intrinsics"]  = _np(a[6])
         from sam3d_objects.pipeline.inference_utils import layout_post_optimization
         return layout_post_optimization(*a, **kw)
 
@@ -189,6 +205,28 @@ def main() -> None:
 
     mesh = output["glb"]
     vertices = mesh.vertices
+
+    # Save checkpoint BEFORE applying transform (raw TRELLIS mesh + original pose).
+    if args.checkpoint and _ckpt:
+        ckpt_dir = os.path.dirname(args.checkpoint)
+        if ckpt_dir:
+            os.makedirs(ckpt_dir, exist_ok=True)
+        save_dict = {
+            "vertices":    np.array(vertices, dtype=np.float32),
+            "faces":       np.array(mesh.faces, dtype=np.int32),
+            **_ckpt,
+        }
+        # Include vertex colors if available (for visual fidelity in replayed GLB).
+        try:
+            vc = mesh.visual.vertex_colors
+            if vc is not None:
+                save_dict["vertex_colors"] = np.array(vc, dtype=np.uint8)
+        except Exception:
+            pass
+        np.savez(args.checkpoint, **save_dict)
+        print(f"[checkpoint] Saved: {args.checkpoint}", flush=True)
+        print(f"[checkpoint]   mesh: {save_dict['vertices'].shape[0]} verts, {save_dict['faces'].shape[0]} faces", flush=True)
+        print(f"[checkpoint]   rotation: {save_dict['rotation'].shape}, translation: {save_dict['translation'].shape}, scale: {save_dict['scale'].shape}", flush=True)
 
     S = output["scale"][0].cpu().float()
     T = output["translation"][0].cpu().float()
