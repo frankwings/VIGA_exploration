@@ -62,39 +62,39 @@ accept = dist(P, best_plane) <= max(max_inlier_error_of_best_fit, 0.005)
 
 Each 4-panel: acceptance ratio map (green < 1 = accepted, red > 1 = rejected) | original + cleaned + hull | grown mask | ratio histogram.
 
-![chair_cushion_mask_growth](../output/sam3d_dining_ransac/vis/chair_cushion_mask_growth.png)
+![chair_cushion_mask_growth](test_results_images/sam3d_dining_ransac/chair_cushion_mask_growth.png)
 
 **chair_cushion:** +1,625px. Previous angle method gave +6px (global reference fails for curved cushion). RANSAC gives +1,625px — better than angle, but less than plane-distance (+6,436px). The 8-sector constraint helps but the adaptive threshold is tighter than a fixed 3cm.
 
-![chair_legs_mask_growth](../output/sam3d_dining_ransac/vis/chair_legs_mask_growth.png)
+![chair_legs_mask_growth](test_results_images/sam3d_dining_ransac/chair_legs_mask_growth.png)
 
 **chair_legs:** Only +4,819px (vs +33,530px angle / +35,300px plane-dist). Surprising — this is a flat object where RANSAC should work well. Root cause: very flat surface → RANSAC inlier errors are sub-mm → adaptive threshold collapses to 5mm floor. Hull pixels 1–3cm away (well within the 3cm plane-distance budget) are rejected. RANSAC is over-conservative on large flat objects.
 
-![newspaper_mask_growth](../output/sam3d_dining_ransac/vis/newspaper_mask_growth.png)
+![newspaper_mask_growth](test_results_images/sam3d_dining_ransac/newspaper_mask_growth.png)
 
 **newspaper:** +365px, similar to plane-distance +389px. Both correctly conservative — hull region overlaps with the table surface at different depth. RANSAC slightly tighter but consistent result.
 
-![placemat_mask_growth](../output/sam3d_dining_ransac/vis/placemat_mask_growth.png)
+![placemat_mask_growth](test_results_images/sam3d_dining_ransac/placemat_mask_growth.png)
 
 **placemat:** +220px (vs +1,187px plane-dist). Flat object, very small hull gap. RANSAC floor threshold makes it conservative. The plane-distance method was more permissive here.
 
-![round_table_with_tablecloth_mask_growth](../output/sam3d_dining_ransac/vis/round_table_with_tablecloth_mask_growth.png)
+![round_table_with_tablecloth_mask_growth](test_results_images/sam3d_dining_ransac/round_table_with_tablecloth_mask_growth.png)
 
 **round_table_with_tablecloth:** +12,044px (vs +48,088px angle / +45,143px plane-dist). Draped tablecloth with complex geometry — RANSAC is the most conservative of all three methods. The cloth folds cause high inlier variance, making the adaptive threshold unpredictable sector-by-sector.
 
-![sofa_with_patterned_cover_mask_growth](../output/sam3d_dining_ransac/vis/sofa_with_patterned_cover_mask_growth.png)
+![sofa_with_patterned_cover_mask_growth](test_results_images/sam3d_dining_ransac/sofa_with_patterned_cover_mask_growth.png)
 
 **sofa_with_patterned_cover:** +4,101px (vs +36,710px plane-dist). RANSAC is very conservative on large curved objects. The 8-sector search near a large curved sofa finds Q's on different parts of the curve → plane fit degenerate or high inlier error → tight threshold.
 
-![strainer_mask_growth](../output/sam3d_dining_ransac/vis/strainer_mask_growth.png)
+![strainer_mask_growth](test_results_images/sam3d_dining_ransac/strainer_mask_growth.png)
 
 **strainer:** +2,735px (vs +4,922px plane-dist). Small perforated bowl — RANSAC fills ~55% of what plane-distance fills. Some sectors around the bowl interior have no mask pixels, reducing RANSAC effectiveness.
 
-![travel_pillow_mask_growth](../output/sam3d_dining_ransac/vis/travel_pillow_mask_growth.png)
+![travel_pillow_mask_growth](test_results_images/sam3d_dining_ransac/travel_pillow_mask_growth.png)
 
 **travel_pillow:** +747px (vs +2,509px plane-dist). Curved U-shape pillow. RANSAC more conservative than plane-distance.
 
-![wooden_chair_mask_growth](../output/sam3d_dining_ransac/vis/wooden_chair_mask_growth.png)
+![wooden_chair_mask_growth](test_results_images/sam3d_dining_ransac/wooden_chair_mask_growth.png)
 
 **wooden_chair:** +4,325px (vs +23,945px plane-dist). Sparse frame mask — large hull gap (78K px between chair slats). RANSAC correctly rejects background (transparent regions between slats at different depths), but also rejects many legitimate chair surface pixels due to floor-threshold tightness.
 

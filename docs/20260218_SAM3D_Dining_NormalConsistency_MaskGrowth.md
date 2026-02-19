@@ -39,39 +39,39 @@ Applied the normal-consistency convex hull mask growth algorithm (v3, developed 
 
 Each 4-panel: normal deviation angle map | original mask + convex hull | grown mask | angle histogram.
 
-![chair_cushion_mask_growth](../output/sam3d_dining_v5/vis/chair_cushion_mask_growth.png)
+![chair_cushion_mask_growth](test_results_images/sam3d_dining_v5/chair_cushion_mask_growth.png)
 
 **chair_cushion (+6px, threshold=45.8°):** Mask is already nearly convex — hull gap is only 6,459px and the normal method correctly identifies that almost all gap pixels have different normals (edge of cushion against chair frame).
 
-![chair_legs_mask_growth](../output/sam3d_dining_v5/vis/chair_legs_mask_growth.png)
+![chair_legs_mask_growth](test_results_images/sam3d_dining_v5/chair_legs_mask_growth.png)
 
 **chair_legs (+33,530px, threshold=19.1°):** Large flat structure. Tight adaptive threshold (19.1°) reflects uniform surface normals inside the mask. Growth fills in substantial concavities (leg gaps, crossbars) — 39% of the hull gap (85,620px gap, 33,530 added).
 
-![newspaper_mask_growth](../output/sam3d_dining_v5/vis/newspaper_mask_growth.png)
+![newspaper_mask_growth](test_results_images/sam3d_dining_v5/newspaper_mask_growth.png)
 
 **newspaper (+4,041px, threshold=32.5°):** Flat rectangular object lying on table. Hull gap is 11,777px; 4,041 (34%) are added. Concave corners and edge indentations filled.
 
-![placemat_mask_growth](../output/sam3d_dining_v5/vis/placemat_mask_growth.png)
+![placemat_mask_growth](test_results_images/sam3d_dining_v5/placemat_mask_growth.png)
 
 **placemat (+168px, threshold=15.1°):** Extremely flat surface → extremely tight threshold. Only 168 of the 1,172px hull gap accepted. Indicates placemat normal distribution is very peaked — growth only where surface is truly coplanar.
 
-![round_table_with_tablecloth_mask_growth](../output/sam3d_dining_v5/vis/round_table_with_tablecloth_mask_growth.png)
+![round_table_with_tablecloth_mask_growth](test_results_images/sam3d_dining_v5/round_table_with_tablecloth_mask_growth.png)
 
 **round_table_with_tablecloth (+48,088px, threshold=60.0°):** Threshold hits 60° cap — draped tablecloth has highly varying normals. 92% of the 52,151px hull gap filled. The tablecloth's folds create wide normal spread inside the mask, driving the adaptive threshold up to the cap.
 
-![sofa_with_patterned_cover_mask_growth](../output/sam3d_dining_v5/vis/sofa_with_patterned_cover_mask_growth.png)
+![sofa_with_patterned_cover_mask_growth](test_results_images/sam3d_dining_v5/sofa_with_patterned_cover_mask_growth.png)
 
 **sofa_with_patterned_cover (+30,072px, threshold=58.5°):** Large curved sofa, threshold near cap. 34% of the 88,434px hull gap filled — the patterned cover introduces normal variation, keeping some background pixels rejected.
 
-![strainer_mask_growth](../output/sam3d_dining_v5/vis/strainer_mask_growth.png)
+![strainer_mask_growth](test_results_images/sam3d_dining_v5/strainer_mask_growth.png)
 
 **strainer (+4,823px, threshold=60.0°):** Complex 3D shape (perforated bowl). Threshold hits cap — curved/perforated surface has highly varying normals. 97% of the 4,976px hull gap filled.
 
-![travel_pillow_mask_growth](../output/sam3d_dining_v5/vis/travel_pillow_mask_growth.png)
+![travel_pillow_mask_growth](test_results_images/sam3d_dining_v5/travel_pillow_mask_growth.png)
 
 **travel_pillow (+1,745px, threshold=60.0°):** U-shaped curved pillow. Threshold hits cap, 68% of the 2,581px hull gap filled.
 
-![wooden_chair_mask_growth](../output/sam3d_dining_v5/vis/wooden_chair_mask_growth.png)
+![wooden_chair_mask_growth](test_results_images/sam3d_dining_v5/wooden_chair_mask_growth.png)
 
 **wooden_chair (+22,795px, threshold=60.0°):** Large sparse mask (chair frame gaps). Hull gap is 87,217px — SAM missed large interior regions between chair slats. Threshold hits 60° cap; 26% of gap filled. Curved chair back and legs cause wide normal spread.
 

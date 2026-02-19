@@ -64,39 +64,39 @@ accept         = plane_dist < threshold_m   # fixed 3 cm
 
 Each 4-panel: plane distance map (0=coplanar/green → red=far) | original + cleaned + hull | grown mask | plane distance histogram.
 
-![chair_cushion_mask_growth](../output/sam3d_dining_plane_dist/vis/chair_cushion_mask_growth.png)
+![chair_cushion_mask_growth](test_results_images/sam3d_dining_plane_dist/chair_cushion_mask_growth.png)
 
 **chair_cushion:** +6,436px at 3 cm threshold. Previous angle method gave only +6px due to curved surface failing the global reference. Plane-distance correctly identifies the coplanar cushion pixels through local neighbor comparison. Morphological opening removed -19px of boundary noise.
 
-![chair_legs_mask_growth](../output/sam3d_dining_plane_dist/vis/chair_legs_mask_growth.png)
+![chair_legs_mask_growth](test_results_images/sam3d_dining_plane_dist/chair_legs_mask_growth.png)
 
 **chair_legs:** +35,300px. Large structured flat object with concave leg gaps. Hull gap well filled. Erosion removes -98px of jagged boundary pixels from the complex multi-leg silhouette.
 
-![newspaper_mask_growth](../output/sam3d_dining_plane_dist/vis/newspaper_mask_growth.png)
+![newspaper_mask_growth](test_results_images/sam3d_dining_plane_dist/newspaper_mask_growth.png)
 
 **newspaper:** Only +389px (was +4,041px with angle method). Plane distance is stricter — hull pixels that are on a different surface (table background) are correctly rejected because their 3D position is off the newspaper's tangent plane. More conservative = more correct.
 
-![placemat_mask_growth](../output/sam3d_dining_plane_dist/vis/placemat_mask_growth.png)
+![placemat_mask_growth](test_results_images/sam3d_dining_plane_dist/placemat_mask_growth.png)
 
 **placemat:** +1,187px (was +168px). Flat object — plane-distance with local reference is more aggressive than the angle method's tight 15° adaptive threshold, which was overly conservative for a flat surface.
 
-![round_table_with_tablecloth_mask_growth](../output/sam3d_dining_plane_dist/vis/round_table_with_tablecloth_mask_growth.png)
+![round_table_with_tablecloth_mask_growth](test_results_images/sam3d_dining_plane_dist/round_table_with_tablecloth_mask_growth.png)
 
 **round_table_with_tablecloth:** +45,143px. Draped tablecloth has complex geometry; both methods fill most of the 52K px hull gap. Plane distance slightly more conservative (-3K vs angle method) for the outermost cloth folds.
 
-![sofa_with_patterned_cover_mask_growth](../output/sam3d_dining_plane_dist/vis/sofa_with_patterned_cover_mask_growth.png)
+![sofa_with_patterned_cover_mask_growth](test_results_images/sam3d_dining_plane_dist/sofa_with_patterned_cover_mask_growth.png)
 
 **sofa_with_patterned_cover:** +36,710px (was +30,072px). Large curved sofa benefits from local reference — plane distance correctly follows the sofa surface curvature rather than being capped by a global 60° limit.
 
-![strainer_mask_growth](../output/sam3d_dining_plane_dist/vis/strainer_mask_growth.png)
+![strainer_mask_growth](test_results_images/sam3d_dining_plane_dist/strainer_mask_growth.png)
 
 **strainer:** +4,922px, nearly identical to angle method (+4,823px). Small complex 3D shape; both methods fill the hull gap similarly.
 
-![travel_pillow_mask_growth](../output/sam3d_dining_plane_dist/vis/travel_pillow_mask_growth.png)
+![travel_pillow_mask_growth](test_results_images/sam3d_dining_plane_dist/travel_pillow_mask_growth.png)
 
 **travel_pillow:** +2,509px (was +1,745px). Curved U-shape pillow benefits from local reference rather than global mean.
 
-![wooden_chair_mask_growth](../output/sam3d_dining_plane_dist/vis/wooden_chair_mask_growth.png)
+![wooden_chair_mask_growth](test_results_images/sam3d_dining_plane_dist/wooden_chair_mask_growth.png)
 
 **wooden_chair:** +23,945px. Sparse frame mask with large hull gap (78K px). 26% of hull gap filled — correctly rejects the transparent regions between chair slats (background depth ≠ chair surface plane).
 

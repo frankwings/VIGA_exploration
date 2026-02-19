@@ -64,39 +64,39 @@ Each image is a 2×2 grid:
 
 > Yellow = hull boundary, **not** growth pixels. Growth pixels = **orange** in bottom-left.
 
-![chair_cushion_mask_growth](../output/sam3d_dining_v6/vis/chair_cushion_mask_growth.png)
+![chair_cushion_mask_growth](test_results_images/sam3d_dining_v6/chair_cushion_mask_growth.png)
 
 **chair_cushion:** +6px, identical to v5. The curved cushion's global reference normal fails — only 6 hull pixels pass the 45.8° angle gate. 874 additional pixels pass the depth gate alone but not the normal gate, showing the normal gate is still the bottleneck here.
 
-![chair_legs_mask_growth](../output/sam3d_dining_v6/vis/chair_legs_mask_growth.png)
+![chair_legs_mask_growth](test_results_images/sam3d_dining_v6/chair_legs_mask_growth.png)
 
 **chair_legs:** +2,077px (v5: +33,530px). The depth gate removes 29,897 pixels that pass the tight 19.0° normal threshold but are 5+ cm behind the nearest chair surface pixel — these are floor/tablecloth pixels between the legs. Depth gate is highly effective here.
 
-![newspaper_mask_growth](../output/sam3d_dining_v6/vis/newspaper_mask_growth.png)
+![newspaper_mask_growth](test_results_images/sam3d_dining_v6/newspaper_mask_growth.png)
 
 **newspaper:** +321px (v5: +4,041px). Zero pixels pass both gates, 321 come from just inside the angle threshold with similar depth. The hull region mostly overlaps the table — depth gate aggressively rejects table-depth pixels.
 
-![placemat_mask_growth](../output/sam3d_dining_v6/vis/placemat_mask_growth.png)
+![placemat_mask_growth](test_results_images/sam3d_dining_v6/placemat_mask_growth.png)
 
 **placemat:** +127px (v5: +168px), nearly unchanged. Very flat object with small hull gap — most hull pixels are genuinely on the placemat surface.
 
-![round_table_with_tablecloth_mask_growth](../output/sam3d_dining_v6/vis/round_table_with_tablecloth_mask_growth.png)
+![round_table_with_tablecloth_mask_growth](test_results_images/sam3d_dining_v6/round_table_with_tablecloth_mask_growth.png)
 
 **round_table_with_tablecloth:** +30,315px (v5: +48,088px). Draped tablecloth has depth discontinuities at folds — 17,676px pass the normal gate but are depth-rejected. Still fills 63% of the hull gap.
 
-![sofa_with_patterned_cover_mask_growth](../output/sam3d_dining_v6/vis/sofa_with_patterned_cover_mask_growth.png)
+![sofa_with_patterned_cover_mask_growth](test_results_images/sam3d_dining_v6/sofa_with_patterned_cover_mask_growth.png)
 
 **sofa_with_patterned_cover:** +5,681px (v5: +30,072px). Large curved sofa — 20,591 pixels pass the 58.5° normal threshold but are at different depths (background behind sofa). Depth gate strongly filters the sofa hull interior.
 
-![strainer_mask_growth](../output/sam3d_dining_v6/vis/strainer_mask_growth.png)
+![strainer_mask_growth](test_results_images/sam3d_dining_v6/strainer_mask_growth.png)
 
 **strainer:** +4,094px (v5: +4,823px), only 15% reduction. Small compact object with tight hull — most hull pixels are genuinely on the strainer surface at consistent depth.
 
-![travel_pillow_mask_growth](../output/sam3d_dining_v6/vis/travel_pillow_mask_growth.png)
+![travel_pillow_mask_growth](test_results_images/sam3d_dining_v6/travel_pillow_mask_growth.png)
 
 **travel_pillow:** +545px (v5: +1,745px). U-shaped pillow — 1,194 pixels pass the 60° normal cap but are rejected by depth. Pillow sides are at different depths than the nearest mask pixels.
 
-![wooden_chair_mask_growth](../output/sam3d_dining_v6/vis/wooden_chair_mask_growth.png)
+![wooden_chair_mask_growth](test_results_images/sam3d_dining_v6/wooden_chair_mask_growth.png)
 
 **wooden_chair:** +2,938px (v5: +22,795px). Sparse frame mask with large hull interior. 15,310 normal-passing pixels are depth-rejected (background between slats). 17,613 depth-ok pixels fail the normal gate (back of chair vs front reference). Combined gate is very selective on sparse structures.
 
@@ -153,23 +153,23 @@ Relaxing to 10cm helps `round_table` (+10K px) and `sofa` (+3.5K px) most. Objec
 
 Images from `output/sam3d_dining_v7/vis/` — panel layout and color legend same as v6 above (in-panel legend visible in each image).
 
-![chair_cushion_mask_growth](../output/sam3d_dining_v7/vis/chair_cushion_mask_growth.png)
+![chair_cushion_mask_growth](test_results_images/sam3d_dining_v7/chair_cushion_mask_growth.png)
 
-![chair_legs_mask_growth](../output/sam3d_dining_v7/vis/chair_legs_mask_growth.png)
+![chair_legs_mask_growth](test_results_images/sam3d_dining_v7/chair_legs_mask_growth.png)
 
-![newspaper_mask_growth](../output/sam3d_dining_v7/vis/newspaper_mask_growth.png)
+![newspaper_mask_growth](test_results_images/sam3d_dining_v7/newspaper_mask_growth.png)
 
-![placemat_mask_growth](../output/sam3d_dining_v7/vis/placemat_mask_growth.png)
+![placemat_mask_growth](test_results_images/sam3d_dining_v7/placemat_mask_growth.png)
 
-![round_table_with_tablecloth_mask_growth](../output/sam3d_dining_v7/vis/round_table_with_tablecloth_mask_growth.png)
+![round_table_with_tablecloth_mask_growth](test_results_images/sam3d_dining_v7/round_table_with_tablecloth_mask_growth.png)
 
-![sofa_with_patterned_cover_mask_growth](../output/sam3d_dining_v7/vis/sofa_with_patterned_cover_mask_growth.png)
+![sofa_with_patterned_cover_mask_growth](test_results_images/sam3d_dining_v7/sofa_with_patterned_cover_mask_growth.png)
 
-![strainer_mask_growth](../output/sam3d_dining_v7/vis/strainer_mask_growth.png)
+![strainer_mask_growth](test_results_images/sam3d_dining_v7/strainer_mask_growth.png)
 
-![travel_pillow_mask_growth](../output/sam3d_dining_v7/vis/travel_pillow_mask_growth.png)
+![travel_pillow_mask_growth](test_results_images/sam3d_dining_v7/travel_pillow_mask_growth.png)
 
-![wooden_chair_mask_growth](../output/sam3d_dining_v7/vis/wooden_chair_mask_growth.png)
+![wooden_chair_mask_growth](test_results_images/sam3d_dining_v7/wooden_chair_mask_growth.png)
 
 ---
 

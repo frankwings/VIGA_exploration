@@ -49,39 +49,39 @@ Raising the floor from 5mm to 3cm doubles or triples the added pixels on most ob
 
 Each 4-panel: acceptance ratio map (green < 1 = accepted, red > 1 = rejected) | original + cleaned + hull | grown mask | ratio histogram.
 
-![chair_cushion_mask_growth](../output/sam3d_dining_ransac_v2/vis/chair_cushion_mask_growth.png)
+![chair_cushion_mask_growth](test_results_images/sam3d_dining_ransac_v2/chair_cushion_mask_growth.png)
 
 **chair_cushion:** +4,413px (v1: +1,625px → v2: +4,413px). Significant improvement — the curved cushion now gets 69% of what plane-distance adds. 3cm floor allows acceptance of cushion-surface pixels that the 5mm floor rejected.
 
-![chair_legs_mask_growth](../output/sam3d_dining_ransac_v2/vis/chair_legs_mask_growth.png)
+![chair_legs_mask_growth](test_results_images/sam3d_dining_ransac_v2/chair_legs_mask_growth.png)
 
 **chair_legs:** +8,960px (v1: +4,819px → v2: +8,960px). Better but still only 25% of plane-distance (+35,300px). The multi-leg silhouette creates many hull pixels far from the mask where some 2D sectors contain no mask pixels → `min_inliers` not met → rejection persists.
 
-![newspaper_mask_growth](../output/sam3d_dining_ransac_v2/vis/newspaper_mask_growth.png)
+![newspaper_mask_growth](test_results_images/sam3d_dining_ransac_v2/newspaper_mask_growth.png)
 
 **newspaper:** +389px — identical to plane-distance result. RANSAC and plane-distance agree perfectly here. The hull region genuinely overlaps with the table surface; both methods correctly limit growth.
 
-![placemat_mask_growth](../output/sam3d_dining_ransac_v2/vis/placemat_mask_growth.png)
+![placemat_mask_growth](test_results_images/sam3d_dining_ransac_v2/placemat_mask_growth.png)
 
 **placemat:** +375px (v1: +220px → v2: +375px). Still below plane-distance (+1,187px). Small flat object with small hull gap; 3cm floor relaxes acceptance but multi-sector constraint still limits.
 
-![round_table_with_tablecloth_mask_growth](../output/sam3d_dining_ransac_v2/vis/round_table_with_tablecloth_mask_growth.png)
+![round_table_with_tablecloth_mask_growth](test_results_images/sam3d_dining_ransac_v2/round_table_with_tablecloth_mask_growth.png)
 
 **round_table_with_tablecloth:** +22,111px (v1: +12,044px → v2: +22,111px). Substantial improvement, now at 49% of plane-distance (+45,143px). Draped tablecloth has enough surrounding mask pixels in all sectors at the hull boundary.
 
-![sofa_with_patterned_cover_mask_growth](../output/sam3d_dining_ransac_v2/vis/sofa_with_patterned_cover_mask_growth.png)
+![sofa_with_patterned_cover_mask_growth](test_results_images/sam3d_dining_ransac_v2/sofa_with_patterned_cover_mask_growth.png)
 
 **sofa_with_patterned_cover:** +11,287px (v1: +4,101px → v2: +11,287px). Large improvement, at 31% of plane-distance. The sofa's large hull gap means many hull pixels are far from the mask edge with sparse sector coverage.
 
-![strainer_mask_growth](../output/sam3d_dining_ransac_v2/vis/strainer_mask_growth.png)
+![strainer_mask_growth](test_results_images/sam3d_dining_ransac_v2/strainer_mask_growth.png)
 
 **strainer:** +3,544px (v1: +2,735px → v2: +3,544px). Now at 72% of plane-distance (+4,922px). Small complex shape with good sector coverage near the hull boundary.
 
-![travel_pillow_mask_growth](../output/sam3d_dining_ransac_v2/vis/travel_pillow_mask_growth.png)
+![travel_pillow_mask_growth](test_results_images/sam3d_dining_ransac_v2/travel_pillow_mask_growth.png)
 
 **travel_pillow:** +1,887px (v1: +747px → v2: +1,887px). Now at 75% of plane-distance (+2,509px). U-shaped pillow has good surrounding sector coverage.
 
-![wooden_chair_mask_growth](../output/sam3d_dining_ransac_v2/vis/wooden_chair_mask_growth.png)
+![wooden_chair_mask_growth](test_results_images/sam3d_dining_ransac_v2/wooden_chair_mask_growth.png)
 
 **wooden_chair:** +14,955px (v1: +4,325px → v2: +14,955px). Large improvement (3.5×), now at 62% of plane-distance (+23,945px). Chair frame has large hull gap; hull pixels deep inside the gap have some empty sectors → partial rejection remains.
 
