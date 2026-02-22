@@ -266,26 +266,33 @@ class Transform3dSimple:
 
 
 def transform_and_export_glb(mesh_path, glb_path, quaternion, translation, scale,
-                             pbr_glb_path=None, aligned_pbr_path=None,
-                             vertices_np=None, faces_np=None):
+                             pbr_glb_path=None, aligned_pbr_path=None):
     """Transform mesh vertices from canonical Z-up to aligned PyTorch3D camera space.
 
     Also optionally transforms PBR GLB vertices (which are already in Y-up from to_glb).
-
-    If vertices_np/faces_np are provided, use them directly instead of loading
-    from mesh_path.  This avoids re-loading the full raw mesh (which can be
-    500K–2.3M vertices for TRELLIS2) and allows passing a pre-decimated version.
+    Dense TRELLIS2 meshes (500K–2.3M vertices) are decimated to MAX_FACES_FOR_EXPORT
+    to keep GLBs small enough for Blender to import.
     """
+    MAX_FACES_FOR_EXPORT = 100000
     device = "cpu"
 
-    # Use pre-loaded mesh if provided, otherwise load from NPZ
-    if vertices_np is not None and faces_np is not None:
-        vertices = torch.tensor(vertices_np, dtype=torch.float32, device=device)
-        faces = faces_np
-    else:
-        data = np.load(mesh_path)
-        vertices = torch.tensor(data["vertices"], dtype=torch.float32, device=device)
-        faces = data["faces"]
+    data = np.load(mesh_path)
+    vertices = torch.tensor(data["vertices"], dtype=torch.float32, device=device)
+    faces = data["faces"]
+
+    # Decimate dense meshes for export (separate from alignment decimation)
+    if faces.shape[0] > MAX_FACES_FOR_EXPORT:
+        import open3d as o3d
+        mesh_o3d = o3d.geometry.TriangleMesh()
+        mesh_o3d.vertices = o3d.utility.Vector3dVector(vertices.numpy())
+        mesh_o3d.triangles = o3d.utility.Vector3iVector(faces)
+        mesh_o3d.remove_duplicated_vertices()
+        mesh_o3d.remove_degenerate_triangles()
+        mesh_o3d = mesh_o3d.simplify_quadric_decimation(MAX_FACES_FOR_EXPORT)
+        vertices = torch.tensor(np.asarray(mesh_o3d.vertices), dtype=torch.float32, device=device)
+        faces = np.asarray(mesh_o3d.triangles).astype(np.int32)
+        print(f"[POSE] Export decimated to {faces.shape[0]} faces, {vertices.shape[0]} verts",
+              flush=True)
 
     # Apply R_zup_to_yup then S/R/T
     vertices_yup = vertices @ R_zup_to_yup.to(device)
@@ -462,9 +469,8 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
     if S_final.dim() == 1:
         S_final = S_final.unsqueeze(0)
 
-    # Export aligned GLB using the (possibly pre-decimated) mesh, not the raw NPZ.
-    # This keeps GLB files small enough for Blender to import (~1-3 MB instead of
-    # 18-81 MB from the full TRELLIS2 voxel decoder output).
+    # Export aligned GLB from full-resolution raw mesh (decimated to 100K faces
+    # for export if needed — separate from the 20K alignment decimation).
     glb_path = obj["glb"]
     pbr_glb_path = obj.get("pbr_glb")
     aligned_pbr_path = obj.get("aligned_pbr")
@@ -472,8 +478,6 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
         mesh_path, glb_path, R_final, T_final, S_final,
         pbr_glb_path=pbr_glb_path,
         aligned_pbr_path=aligned_pbr_path,
-        vertices_np=vertices,
-        faces_np=faces,
     )
 
     # Build info dict — store the ISOTROPIC intrinsics that the optimizer
