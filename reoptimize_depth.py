@@ -763,6 +763,8 @@ def main():
                         help="ICP max correspondence distance")
     parser.add_argument("--edge-sigma", type=float, default=2.0,
                         help="Depth edge threshold = median + edge_sigma * std")
+    parser.add_argument("--no-scale", action="store_true",
+                        help="Disable post-ICP depth-scale correction")
     args = parser.parse_args()
 
     data_dir = args.data_dir.resolve()
@@ -891,6 +893,10 @@ def main():
         s, scale_info = compute_depth_scale(
             verts_aligned, mask_bool, depth, fx, fy, cx, cy, H, W,
         )
+        if args.no_scale:
+            s = 1.0
+            scale_info["scale"] = 1.0
+            scale_info["reason"] = "disabled"
         verts_scaled = apply_depth_scale(verts_aligned, s)
         print(f"  Scale: s={s:.4f}  ({scale_info['valid_count']} pts, "
               f"ratio_std={scale_info.get('ratio_std', 0):.4f})")
