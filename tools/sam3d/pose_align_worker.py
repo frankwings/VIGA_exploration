@@ -442,7 +442,9 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
         aligned_pbr_path=aligned_pbr_path,
     )
 
-    # Build info dict
+    # Build info dict — store the ISOTROPIC intrinsics that the optimizer
+    # actually used (fx=fy=min(fx,fy)), not the original non-isotropic ones.
+    # Projection and Blender scene render must use these same intrinsics.
     info = {
         "object_name": name,
         "glb_path": glb_path,
@@ -450,7 +452,7 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
         "rotation": R_final.squeeze().tolist(),
         "scale": S_final.squeeze().tolist(),
         "iou": float(final_iou),
-        "intrinsics": intrinsics.cpu().tolist() if hasattr(intrinsics, 'cpu') else intrinsics,
+        "intrinsics": intr.cpu().tolist() if hasattr(intr, 'cpu') else intr,
         "pointmap_shape": [pm_h, pm_w],
     }
 
