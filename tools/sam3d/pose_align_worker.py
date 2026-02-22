@@ -371,15 +371,10 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
     re_focal = min(fx, fy)
     intr[0, 0], intr[1, 1] = re_focal, re_focal
 
-    # Pad pointmap to square and resize to mask size
-    from sam3d_objects.data.dataset.tdfy.img_processing import pad_to_square_centered
-    pm_padded = pad_to_square_centered(pointmap.float(), value=float('nan'))
-    if pm_padded.shape[1] != pm_h or pm_padded.shape[2] != pm_w:
-        pm_padded = F.interpolate(
-            pm_padded.unsqueeze(0), size=(pm_h, pm_w), mode="bilinear",
-            align_corners=False
-        ).squeeze(0)
-    point_map = pm_padded.permute(1, 2, 0)  # (H, W, 3)
+    # Pass pointmap directly — layout_post_optimization handles its own resize.
+    # Do NOT pad-to-square with NaN then bilinear-resize, as bilinear interpolation
+    # with NaN neighbors spreads NaN to all surrounding pixels.
+    point_map = pointmap.float().permute(1, 2, 0)  # (3, H, W) → (H, W, 3)
 
     # Run layout_post_optimization
     print(f"[POSE] {name}: running layout_post_optimization...", flush=True)
