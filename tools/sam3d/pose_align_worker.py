@@ -343,6 +343,28 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
     faces = data["faces"]
     print(f"[POSE] {name}: mesh {vertices.shape[0]} verts, {faces.shape[0]} faces", flush=True)
 
+    # Pre-decimate dense TRELLIS2 meshes before layout_post_optimization.
+    # TRELLIS2 raw meshes have 500K–2.3M vertices (voxel decoder output),
+    # while TRELLIS1 produces 3K–17K.  The optimizer's internal simplification
+    # (simplify_quadric_decimation to 5000 triangles) struggles with extreme
+    # 400:1 reductions, producing distorted meshes and poor alignment.
+    # Pre-decimating to ~20K faces gives the optimizer a clean, manageable mesh.
+    MAX_FACES_FOR_ALIGNMENT = 20000
+    if faces.shape[0] > MAX_FACES_FOR_ALIGNMENT:
+        import open3d as o3d
+        mesh_o3d = o3d.geometry.TriangleMesh()
+        mesh_o3d.vertices = o3d.utility.Vector3dVector(vertices)
+        mesh_o3d.triangles = o3d.utility.Vector3iVector(faces)
+        mesh_o3d.remove_duplicated_vertices()
+        mesh_o3d.remove_degenerate_triangles()
+        mesh_o3d = mesh_o3d.simplify_quadric_decimation(MAX_FACES_FOR_ALIGNMENT)
+        vertices_dec = np.asarray(mesh_o3d.vertices).astype(np.float32)
+        faces_dec = np.asarray(mesh_o3d.triangles).astype(np.int32)
+        print(f"[POSE] {name}: pre-decimated {faces.shape[0]} → {faces_dec.shape[0]} faces "
+              f"({vertices.shape[0]} → {vertices_dec.shape[0]} verts)", flush=True)
+        vertices = vertices_dec
+        faces = faces_dec
+
     # Create trimesh for layout_post_optimization
     mesh = trimesh.Trimesh(vertices=vertices.copy(), faces=faces.copy())
 
