@@ -99,10 +99,9 @@ def load_mesh(glb_path):
     return scene_data
 
 
-def render_rotation_blender(glb_path, name, output_dir, n_frames=12, resolution=256):
+def render_rotation_blender(glb_path, name, output_dir, n_frames=12, resolution=1024):
     """Render rotation frames using Blender via blender_render_rotation.py script."""
     import subprocess
-    import tempfile
 
     blender_script = os.path.join(ROOT, "tools", "blender_render_rotation.py")
 
@@ -123,11 +122,14 @@ def render_rotation_blender(glb_path, name, output_dir, n_frames=12, resolution=
 
     cmd = [
         blender_cmd, "--background", "--python", blender_script,
-        "--", str(glb_path), str(frame_dir), "--frames", str(n_frames),
+        "--", str(glb_path), str(frame_dir),
+        "--frames", str(n_frames),
+        "--resolution", str(resolution),
     ]
 
-    print(f"[VIZ] Blender rendering {name} ({n_frames} frames)...", flush=True)
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    print(f"[VIZ] Blender rendering {name} ({n_frames} frames @ {resolution}x{resolution})...",
+          flush=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if result.returncode != 0:
         print(f"[VIZ] Blender stderr: {result.stderr[-500:]}")
         raise RuntimeError(f"Blender render failed for {name}")
@@ -147,8 +149,6 @@ def render_rotation_blender(glb_path, name, output_dir, n_frames=12, resolution=
     frames = []
     for fp in y_frames:
         img = Image.open(fp).convert("RGB")
-        if img.size != (resolution, resolution):
-            img = img.resize((resolution, resolution), Image.LANCZOS)
         frames.append(img)
 
     if not frames:

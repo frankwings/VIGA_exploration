@@ -25,6 +25,8 @@ tool_configs: List[Dict[str, object]] = []
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 SAM_WORKER = os.path.join(os.path.dirname(__file__), "sam_worker.py")
 SAM3D_WORKER = os.path.join(os.path.dirname(__file__), "sam3d_worker.py")
+TRELLIS2_WORKER = os.path.join(os.path.dirname(__file__), "trellis2_worker.py")
+POSE_ALIGN_WORKER = os.path.join(os.path.dirname(__file__), "pose_align_worker.py")
 IMPORT_SCRIPT = os.path.join(os.path.dirname(__file__), "..", "blender", "glb_import.py")
 
 mcp = FastMCP("sam-init")
@@ -38,11 +40,16 @@ _blender_file: Optional[str] = None
 _log_file: Optional[object] = None
 _sam_env_bin: Optional[str] = None
 _sam3d_env_bin: Optional[str] = None
+_trellis_version: Optional[str] = None
+_trellis2_env_bin: Optional[str] = None
+_pose_align_env_bin: Optional[str] = None
 
 # Safely get paths to avoid uncaught KeyError exceptions
 try:
     _sam_env_bin = path_to_cmd.get("tools/sam3d/sam_worker.py")
     _sam3d_env_bin = path_to_cmd.get("tools/sam3d/sam3d_worker.py")
+    _trellis2_env_bin = path_to_cmd.get("tools/sam3d/trellis2_worker.py")
+    _pose_align_env_bin = path_to_cmd.get("tools/sam3d/pose_align_worker.py")
 except Exception as e:
     print(f"[SAM_INIT] Error initializing paths: {e}", file=sys.stderr)
 
@@ -117,15 +124,18 @@ def prepare_env_with_conda_prefix(python_path: str) -> Dict[str, str]:
 
 @mcp.tool()
 def initialize(args: Dict[str, object]) -> Dict[str, object]:
-    """Initialize SAM scene reconstruction with configuration."""
-    global _target_image, _output_dir, _sam3_cfg, _blender_command, _sam_env_bin, _blender_file, _log_file
+    """Initialize SAM scene reconstruction with configuration.
+
+    Args.trellis_version: "1" (default, TRELLIS1) or "2" (TRELLIS2 with PBR textures).
+    """
+    global _target_image, _output_dir, _sam3_cfg, _blender_command, _sam_env_bin, _blender_file, _log_file, _trellis_version
     try:
         _target_image = args["target_image_path"]
         _output_dir = args.get("output_dir") + "/sam_init"
         if os.path.exists(_output_dir):
             shutil.rmtree(_output_dir)
         os.makedirs(_output_dir, exist_ok=True)
-        
+
         # Initialize log file
         log_path = os.path.join(_output_dir, "sam_init.log")
         _log_file = open(log_path, 'w', encoding='utf-8')
@@ -137,12 +147,15 @@ def initialize(args: Dict[str, object]) -> Dict[str, object]:
         # Record the passed blender_file parameter for later writing directly to that path during reconstruction
         _blender_file = args.get("blender_file")
 
+        # TRELLIS version: "1" (default) or "2" (TRELLIS2 with PBR textures)
+        _trellis_version = str(args.get("trellis_version", "1"))
+
         # Try to get the python path for sam_worker.py
         # If not configured, use sam3d environment (assuming they might be in the same environment)
         _sam_env_bin = path_to_cmd.get("tools/sam3d/sam_worker.py") or _sam3d_env_bin
-        
-        log("[SAM_INIT] sam init initialized")
-        return {"status": "success", "output": {"text": ["sam init initialized"], "tool_configs": tool_configs}}
+
+        log(f"[SAM_INIT] sam init initialized (TRELLIS version: {_trellis_version})")
+        return {"status": "success", "output": {"text": [f"sam init initialized (trellis_version={_trellis_version})"], "tool_configs": tool_configs}}
     except Exception as e:
         error_msg = f"Error in initialize: {str(e)}"
         if _log_file:
@@ -369,7 +382,11 @@ def reconstruct_full_scene() -> Dict[str, object]:
         else:
             log(f"[SAM_INIT] Warning: Object names mapping file not found: {object_names_json_path}, using default names")
 
-        log(f"[SAM_INIT] Step 2: Reconstructing {len(masks)} objects with SAM-3D (parallel processing)...")
+        # Branch based on TRELLIS version
+        if _trellis_version == "2":
+            return _reconstruct_trellis2(masks, object_mapping)
+
+        log(f"[SAM_INIT] Step 2: Reconstructing {len(masks)} objects with TRELLIS1...")
 
         # Prepare parameter list
         tasks = []
@@ -480,6 +497,195 @@ def reconstruct_full_scene() -> Dict[str, object]:
         log(f"[SAM_INIT] {error_msg}")
         log(f"[SAM_INIT] Traceback: {traceback.format_exc()}")
         return {"status": "error", "output": {"text": [error_msg]}}
+
+
+def _reconstruct_trellis2(masks, object_mapping):
+    """Reconstruct scene using TRELLIS2 (two-stage: mesh generation + pose alignment).
+
+    Stage A: trellis2_worker.py — 3D mesh generation with PBR textures
+    Stage B: pose_align_worker.py — MoGe + layout_post_optimization for pose alignment
+    """
+    global _target_image, _output_dir, _trellis2_env_bin, _pose_align_env_bin
+    global _blender_command, _blender_file
+
+    if _trellis2_env_bin is None:
+        return {"status": "error", "output": {"text": [
+            "TRELLIS2 python env not configured. Set up the 'trellis2' conda env and update utils/_path.py"
+        ]}}
+    if _pose_align_env_bin is None:
+        return {"status": "error", "output": {"text": [
+            "Pose alignment python env not configured. Ensure 'sam3d_py311' conda env is available."
+        ]}}
+
+    import platform
+    from PIL import Image as PILImage
+
+    creationflags = 0
+    if platform.system() == "Windows":
+        creationflags = subprocess.CREATE_NO_WINDOW
+
+    # Build object names list
+    object_names = []
+    for idx in range(len(masks)):
+        if object_mapping and idx < len(object_mapping):
+            name = object_mapping[idx]
+        else:
+            name = f"object_{idx}"
+        object_names.append(name)
+
+    log(f"[SAM_INIT] TRELLIS2: Reconstructing {len(masks)} objects...")
+
+    # Save individual mask files + masked PNGs for TRELLIS2
+    target_img = np.array(PILImage.open(_target_image).convert("RGB"))
+    for i, (name, mask) in enumerate(zip(object_names, masks)):
+        mask_path = os.path.join(_output_dir, f"{name}.npy")
+        if not os.path.exists(mask_path):
+            np.save(mask_path, mask)
+
+        png_path = os.path.join(_output_dir, f"{name}.png")
+        if not os.path.exists(png_path):
+            mask_bool = mask > 0
+            if mask_bool.ndim == 3:
+                mask_bool = mask_bool[..., 0]
+            rgba = np.zeros((*target_img.shape[:2], 4), dtype=np.uint8)
+            rgba[..., :3] = target_img
+            rgba[..., 3] = mask_bool.astype(np.uint8) * 255
+            PILImage.fromarray(rgba).save(png_path)
+
+    # --- Stage A: TRELLIS2 3D Reconstruction ---
+    t2_objects = []
+    for name in object_names:
+        t2_objects.append({
+            "name": name,
+            "image": os.path.join(_output_dir, f"{name}.png"),
+            "mask": os.path.join(_output_dir, f"{name}.npy"),
+            "glb": os.path.join(_output_dir, f"{name}_pbr.glb"),
+            "mesh": os.path.join(_output_dir, f"{name}_mesh.npz"),
+        })
+    t2_manifest = {"objects": t2_objects}
+    t2_manifest_path = os.path.join(_output_dir, "trellis2_manifest.json")
+    with open(t2_manifest_path, 'w', encoding='utf-8') as f:
+        json.dump(t2_manifest, f, indent=2)
+
+    log(f"[SAM_INIT] Stage A: Running TRELLIS2 reconstruction...")
+    env = prepare_env_with_conda_prefix(_trellis2_env_bin)
+    env["PYTHONUNBUFFERED"] = "1"
+    t2_log_path = os.path.join(_output_dir, "trellis2.log")
+
+    with open(t2_log_path, 'w', encoding='utf-8') as lf:
+        subprocess.run(
+            [_trellis2_env_bin, "-u", TRELLIS2_WORKER,
+             "--manifest", t2_manifest_path],
+            cwd=ROOT, check=True, text=True,
+            stdin=subprocess.DEVNULL, stdout=lf, stderr=subprocess.STDOUT,
+            env=env, creationflags=creationflags,
+        )
+
+    # --- Stage B: Pose Alignment ---
+    pose_objects = []
+    for name in object_names:
+        mesh_path = os.path.join(_output_dir, f"{name}_mesh.npz")
+        if not os.path.exists(mesh_path):
+            log(f"[SAM_INIT] Mesh not found for {name}, skipping pose alignment")
+            continue
+        pose_objects.append({
+            "name": name,
+            "mesh": mesh_path,
+            "mask": os.path.join(_output_dir, f"{name}.npy"),
+            "glb": os.path.join(_output_dir, f"{name}.glb"),
+            "pbr_glb": os.path.join(_output_dir, f"{name}_pbr.glb"),
+            "aligned_pbr": os.path.join(_output_dir, f"{name}_pbr_aligned.glb"),
+            "info": os.path.join(_output_dir, f"{name}_info.json"),
+        })
+    pose_manifest = {
+        "scene_image": _target_image,
+        "objects": pose_objects,
+    }
+    pose_manifest_path = os.path.join(_output_dir, "pose_manifest.json")
+    with open(pose_manifest_path, 'w', encoding='utf-8') as f:
+        json.dump(pose_manifest, f, indent=2)
+
+    log(f"[SAM_INIT] Stage B: Running pose alignment for {len(pose_objects)} objects...")
+    env2 = prepare_env_with_conda_prefix(_pose_align_env_bin)
+    env2["PYTHONUNBUFFERED"] = "1"
+    env2["LIDRA_SKIP_INIT"] = "1"
+    pose_log_path = os.path.join(_output_dir, "pose_align.log")
+
+    with open(pose_log_path, 'w', encoding='utf-8') as lf:
+        subprocess.run(
+            [_pose_align_env_bin, "-u", POSE_ALIGN_WORKER,
+             "--manifest", pose_manifest_path],
+            cwd=ROOT, check=True, text=True,
+            stdin=subprocess.DEVNULL, stdout=lf, stderr=subprocess.STDOUT,
+            env=env2, creationflags=creationflags,
+        )
+
+    # --- Collect Results ---
+    glb_paths = []
+    object_transforms = []
+    for name in object_names:
+        info_path = os.path.join(_output_dir, f"{name}_info.json")
+        if os.path.exists(info_path):
+            with open(info_path, 'r', encoding='utf-8') as f:
+                info = json.load(f)
+            # Prefer aligned PBR GLB as the primary asset
+            pbr_aligned = os.path.join(_output_dir, f"{name}_pbr_aligned.glb")
+            if os.path.exists(pbr_aligned):
+                info["glb_path"] = pbr_aligned
+                glb_paths.append(pbr_aligned)
+            else:
+                glb_paths.append(info.get("glb_path", ""))
+            object_transforms.append(info)
+
+    if len(glb_paths) == 0:
+        return {"status": "error", "output": {"text": ["No objects reconstructed with TRELLIS2"]}}
+
+    # Save combined transforms
+    transforms_json_path = os.path.join(_output_dir, "object_transforms.json")
+    with open(transforms_json_path, 'w', encoding='utf-8') as f:
+        json.dump(object_transforms, f, indent=2)
+
+    # Step 3: Import into Blender
+    log(f"[SAM_INIT] Step 3: Importing {len(glb_paths)} objects into Blender...")
+    blend_path = _blender_file or os.path.join(_output_dir, "scene.blend")
+
+    blender_cmd = [
+        _blender_command,
+        "-b", "-P", IMPORT_SCRIPT,
+        "--",
+        transforms_json_path,
+        blend_path,
+    ]
+
+    blender_log_path = os.path.join(_output_dir, "blender_import.log")
+    env3 = os.environ.copy()
+    with open(blender_log_path, 'w', encoding='utf-8') as lf:
+        subprocess.run(
+            blender_cmd, cwd=ROOT, check=True, text=True,
+            stdout=lf, stderr=subprocess.STDOUT, env=env3,
+        )
+
+    # Clean up .blend1 files
+    parent_dir = os.path.dirname(_output_dir)
+    for file in os.listdir(parent_dir):
+        if file.endswith(".blend1"):
+            os.remove(os.path.join(parent_dir, file))
+
+    return {
+        "status": "success",
+        "output": {
+            "text": [
+                f"TRELLIS2: reconstructed {len(glb_paths)} objects, Blender scene saved to: {blend_path}",
+            ],
+            "data": {
+                "blend_path": blend_path,
+                "num_objects": len(glb_paths),
+                "num_masks": len(object_transforms),
+                "glb_paths": glb_paths,
+                "trellis_version": "2",
+            }
+        }
+    }
 
 
 def main() -> None:
