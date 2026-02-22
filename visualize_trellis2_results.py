@@ -129,7 +129,7 @@ def render_rotation_blender(glb_path, name, output_dir, n_frames=12, resolution=
 
     print(f"[VIZ] Blender rendering {name} ({n_frames} frames @ {resolution}x{resolution})...",
           flush=True)
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1200)
     if result.returncode != 0:
         print(f"[VIZ] Blender stderr: {result.stderr[-500:]}")
         raise RuntimeError(f"Blender render failed for {name}")

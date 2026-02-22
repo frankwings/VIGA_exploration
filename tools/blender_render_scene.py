@@ -61,8 +61,12 @@ def clear_scene():
 def setup_camera_opencv(fx, fy, cx, cy, img_w, img_h):
     """Camera at origin, looking along -Y_blender (= +Z_opencv forward).
 
-    Uses Rx(-90) rotation. The resulting image needs vertical+horizontal flip
-    in post-processing to correct for PyTorch3D convention.
+    Uses Rx(90) + Rz(180) rotation so that:
+      - Camera forward  = -Y_blender  (= +Z in PyTorch3D camera space)
+      - Camera up       = +Z_blender  (= +Y in PyTorch3D camera space)
+      - Camera right    = -X_blender  (= -X_pt3d = physical right)
+
+    No post-render flip is needed with this rotation.
     """
     bpy.ops.object.camera_add()
     cam_obj = bpy.context.active_object
@@ -70,14 +74,14 @@ def setup_camera_opencv(fx, fy, cx, cy, img_w, img_h):
     cam = cam_obj.data
 
     cam_obj.location = (0, 0, 0)
-    cam_obj.rotation_euler = Euler((math.radians(-90), 0, 0), 'XYZ')
+    cam_obj.rotation_euler = Euler((math.radians(90), 0, math.radians(180)), 'XYZ')
 
     cam.sensor_fit = 'HORIZONTAL'
     cam.sensor_width = float(img_w)
     cam.lens = fx
 
-    cam.shift_x = (cx - img_w / 2.0) / img_w
-    cam.shift_y = -(cy - img_h / 2.0) / img_h
+    cam.shift_x = -(cx - img_w / 2.0) / img_w
+    cam.shift_y = (cy - img_h / 2.0) / img_h
 
     cam.clip_start = 0.001
     cam.clip_end = 1000.0
@@ -135,29 +139,6 @@ def setup_render(width, height):
         scene.eevee.taa_render_samples = 64
     except Exception:
         pass
-
-
-def flip_image(path):
-    """Flip rendered image vertically and horizontally.
-
-    Vertical flip: OpenCV Y-down vs Blender camera Y-up.
-    Horizontal flip: PyTorch3D X-left vs OpenCV/Blender X-right.
-    """
-    img = bpy.data.images.load(path)
-    w, h = img.size
-    pixels = list(img.pixels)
-    px = 4  # RGBA channels per pixel
-    stride = w * px
-    flipped = []
-    for row in range(h - 1, -1, -1):
-        row_data = pixels[row * stride:(row + 1) * stride]
-        reversed_row = []
-        for col in range(w - 1, -1, -1):
-            reversed_row.extend(row_data[col * px:(col + 1) * px])
-        flipped.extend(reversed_row)
-    img.pixels = flipped
-    img.save_render(path)
-    bpy.data.images.remove(img)
 
 
 def main():
@@ -248,8 +229,6 @@ def main():
     bpy.context.scene.render.filepath = args["output_png"]
     bpy.ops.render.render(write_still=True)
 
-    # Flip for PyTorch3D convention
-    flip_image(args["output_png"])
     print(f"[SCENE] Composed scene rendered: {args['output_png']}")
 
 
