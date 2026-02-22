@@ -136,7 +136,10 @@ def create_initial_pose(mesh_vertices, pointmap, mask, device="cuda"):
     mesh_min = verts_yup.min(dim=0).values
     mesh_max = verts_yup.max(dim=0).values
     mesh_extent = mesh_max - mesh_min  # (3,)
-    mesh_height = mesh_extent[1].item()  # Y is up
+    # Use max extent (not just Y) so flat objects don't get inflated scale.
+    # For flat objects like newspaper or chair_cover, Y is the thin dimension
+    # (0.11-0.15) while X or Z can be ~1.0, causing scale to blow up by 7-30x.
+    mesh_max_dim = mesh_extent.max().item()
 
     # Object points from pointmap where mask is True
     pm = pointmap.permute(1, 2, 0)  # (H, W, 3)
@@ -170,14 +173,16 @@ def create_initial_pose(mesh_vertices, pointmap, mask, device="cuda"):
     p90 = torch.quantile(depths, 0.9)
     obj_points = obj_points[depths <= p90]
 
-    # Object height in pointmap
+    # Object extent in pointmap (XYZ bounding box)
     obj_min = obj_points.min(dim=0).values
     obj_max = obj_points.max(dim=0).values
-    obj_height = (obj_max[1] - obj_min[1]).item()
+    obj_extent = obj_max - obj_min
+    # Match max extent of mesh to max extent in pointmap — rotation-agnostic.
+    obj_max_dim = obj_extent.max().item()
 
-    # Scale: ratio of pointmap height to mesh height
-    if mesh_height > 1e-6 and obj_height > 1e-6:
-        scale_val = obj_height / mesh_height
+    # Scale: ratio of pointmap max-extent to mesh max-extent
+    if mesh_max_dim > 1e-6 and obj_max_dim > 1e-6:
+        scale_val = obj_max_dim / mesh_max_dim
     else:
         scale_val = 1.0
 
@@ -191,7 +196,8 @@ def create_initial_pose(mesh_vertices, pointmap, mask, device="cuda"):
     scale = torch.tensor([[scale_val, scale_val, scale_val]], device=device)
     translation = translation.unsqueeze(0)
 
-    print(f"[POSE] Initial pose: scale={scale_val:.4f}, "
+    print(f"[POSE] Initial pose: scale={scale_val:.4f} "
+          f"(mesh_max_dim={mesh_max_dim:.3f}, obj_max_dim={obj_max_dim:.3f}), "
           f"T=[{translation[0, 0]:.3f}, {translation[0, 1]:.3f}, {translation[0, 2]:.3f}]",
           flush=True)
 
