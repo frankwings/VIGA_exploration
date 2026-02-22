@@ -163,111 +163,183 @@ def render_rotation_blender(glb_path, name, output_dir, n_frames=12, resolution=
     return gif_path, frames
 
 
-def rasterize_faces_to_mask(verts, faces, intrinsics, pm_shape, color):
-    """Rasterize mesh faces to a 2D silhouette mask."""
+def project_vertices(verts, intrinsics, pm_shape):
+    """Project PyTorch3D camera-space vertices to 2D pixel coordinates.
+
+    Uses normalized intrinsics (K) and pointmap dimensions.
+    Convention: PT3D X=left, Y=up, Z=forward → OpenCV u=right, v=down.
+    """
     K = np.array(intrinsics)
     H, W = pm_shape
     fx, fy = K[0, 0], K[1, 1]
     cx, cy = K[0, 2], K[1, 2]
 
-    # Project all vertices
     z = verts[:, 2].copy()
     z[z < 0.01] = 0.01
     u = (-verts[:, 0] / z * fx + cx) * W
     v = (-verts[:, 1] / z * fy + cy) * H
+    return u, v
 
-    # Create RGBA overlay image
+
+def rasterize_to_silhouette(verts, intrinsics, pm_shape, color):
+    """Create a dense silhouette mask by projecting vertices to 2D pixels.
+
+    Projects all vertices and fills a binary mask, then dilates to close gaps.
+    Much denser and cleaner than the old sparse face-subsampling approach.
+    """
+    H, W = pm_shape
+    u, v = project_vertices(verts, intrinsics, pm_shape)
+
+    # Filter to in-bounds vertices with positive depth
+    ok = (verts[:, 2] > 0.01) & (u >= 0) & (u < W) & (v >= 0) & (v < H)
+    u_ok = u[ok].astype(np.int32)
+    v_ok = v[ok].astype(np.int32)
+
+    # Create binary mask from projected vertices
+    mask = np.zeros((H, W), dtype=np.uint8)
+    mask[v_ok, u_ok] = 255
+
+    # Dilate to fill gaps between projected points (radius depends on mesh density)
+    n_pixels = ok.sum()
+    if n_pixels > 0:
+        # Estimate point density: more vertices → smaller dilation needed
+        bbox_area = max(1, (u_ok.max() - u_ok.min()) * (v_ok.max() - v_ok.min()))
+        density = n_pixels / bbox_area
+        radius = max(1, min(5, int(2.0 / max(0.01, density))))
+        # Simple box dilation using numpy
+        from PIL import ImageFilter
+        mask_img = Image.fromarray(mask, mode="L")
+        for _ in range(radius):
+            mask_img = mask_img.filter(ImageFilter.MaxFilter(3))
+        mask = np.array(mask_img)
+
+    # Create colored RGBA overlay
+    r, g, b, a = color
     overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-
-    # Subsample faces for speed (draw every Nth face)
-    n_faces = len(faces)
-    step = max(1, n_faces // 5000)  # limit to ~5000 triangles for drawing speed
-
-    for i in range(0, n_faces, step):
-        f = faces[i]
-        z_face = verts[f, 2]
-        if (z_face < 0.01).any():
-            continue
-
-        pts = [(float(u[f[j]]), float(v[f[j]])) for j in range(3)]
-
-        # Check if all points are within image bounds (with margin)
-        xs = [p[0] for p in pts]
-        ys = [p[1] for p in pts]
-        if max(xs) < -W or min(xs) > 2 * W or max(ys) < -H or min(ys) > 2 * H:
-            continue
-
-        draw.polygon(pts, fill=color)
-
-    return overlay
+    overlay_arr = np.array(overlay)
+    mask_bool = mask > 0
+    overlay_arr[mask_bool, 0] = r
+    overlay_arr[mask_bool, 1] = g
+    overlay_arr[mask_bool, 2] = b
+    overlay_arr[mask_bool, 3] = a
+    return Image.fromarray(overlay_arr, "RGBA")
 
 
-def create_overlay(target_img, transforms, data_dir, output_path):
-    """Create 2D overlay of all projected objects on the target image."""
-    target_rgba = target_img.convert("RGBA")
-    H_img, W_img = target_img.size[1], target_img.size[0]  # PIL: (W, H)
+def create_overlay(target_img, transforms, data_dir, output_path,
+                   masks=None, names=None):
+    """Create 2D overlay: projected mesh silhouettes + optional SAM mask contours.
 
+    Two-panel output:
+      Left:  Target image with SAM mask overlays (ground truth)
+      Right: Target image with projected GLB silhouettes (alignment result)
+    """
+    W_img, H_img = target_img.size  # PIL: (W, H)
+
+    # Left panel: SAM masks
+    left = target_img.copy().convert("RGBA")
+    if masks is not None and names is not None:
+        for i, name in enumerate(names):
+            mask = masks[i]
+            if mask.ndim == 3:
+                mask = mask[..., 0]
+            mask_bool = mask > 0
+            color = COLORS[i % len(COLORS)]
+            # Create colored overlay from mask
+            color_layer = Image.new("RGBA", left.size, color)
+            mask_pil = Image.fromarray((mask_bool * 255).astype(np.uint8), mode="L")
+            if mask_pil.size != left.size:
+                mask_pil = mask_pil.resize(left.size, Image.NEAREST)
+            left = Image.composite(
+                Image.alpha_composite(left, color_layer), left, mask_pil,
+            )
+
+    # Right panel: projected GLB silhouettes
+    right = target_img.copy().convert("RGBA")
     for i, obj in enumerate(transforms):
         name = obj["object_name"]
-        glb_path = os.path.join(data_dir, f"{name}.glb")
-        if not os.path.exists(glb_path):
-            print(f"[VIZ] Skipping {name}: GLB not found")
+
+        # Prefer PBR aligned > plain aligned
+        candidates = [
+            os.path.join(data_dir, f"{name}_pbr_aligned.glb"),
+            os.path.join(data_dir, f"{name}.glb"),
+        ]
+        glb_path = None
+        for c in candidates:
+            if os.path.exists(c):
+                glb_path = c
+                break
+
+        if glb_path is None:
+            print(f"[VIZ] Skipping {name}: no GLB found")
             continue
 
-        print(f"[VIZ] Projecting {name}...", flush=True)
+        print(f"[VIZ] Projecting {name} ({os.path.basename(glb_path)})...",
+              flush=True)
         intrinsics = obj["intrinsics"]
         pm_shape = obj["pointmap_shape"]
 
         mesh = load_mesh(glb_path)
-
         color = COLORS[i % len(COLORS)]
-        overlay = rasterize_faces_to_mask(
-            mesh.vertices, mesh.faces, intrinsics, pm_shape, color,
+        overlay = rasterize_to_silhouette(
+            mesh.vertices, intrinsics, pm_shape, color,
         )
 
         # Resize overlay to match target image if needed
-        if overlay.size != target_rgba.size:
-            overlay = overlay.resize(target_rgba.size, Image.LANCZOS)
+        if overlay.size != right.size:
+            overlay = overlay.resize(right.size, Image.LANCZOS)
 
-        target_rgba = Image.alpha_composite(target_rgba, overlay)
+        right = Image.alpha_composite(right, overlay)
 
-    # Add labels
-    draw = ImageDraw.Draw(target_rgba)
-    y_label = 10
-    for i, obj in enumerate(transforms):
-        name = obj["object_name"]
-        iou = obj.get("iou", -1)
-        color = COLORS_SOLID[i % len(COLORS_SOLID)]
-        label = f"{name} (IoU={iou:.2f})"
-        draw.text((10, y_label), label, fill=color)
-        y_label += 18
+    # Add labels to both panels
+    for panel, label_prefix in [(left, "SAM mask"), (right, "Projected GLB")]:
+        draw = ImageDraw.Draw(panel)
+        draw.rectangle([0, 0, 200, 20], fill=(0, 0, 0, 180))
+        draw.text((5, 3), label_prefix, fill=(255, 255, 255))
+        y_label = 22
+        for i, obj in enumerate(transforms):
+            name = obj["object_name"]
+            iou = obj.get("iou", -1)
+            color = COLORS_SOLID[i % len(COLORS_SOLID)]
+            label = f"{name} (IoU={iou:.2f})"
+            draw.rectangle([0, y_label, 250, y_label + 17], fill=(0, 0, 0, 140))
+            draw.text((5, y_label), label, fill=color)
+            y_label += 18
 
-    result = target_rgba.convert("RGB")
+    # Compose side-by-side
+    PAD = 4
+    result = Image.new("RGB", (W_img * 2 + PAD, H_img), (30, 30, 30))
+    result.paste(left.convert("RGB"), (0, 0))
+    result.paste(right.convert("RGB"), (W_img + PAD, 0))
     result.save(output_path)
     print(f"[VIZ] Overlay → {output_path}")
 
 
 def create_summary_grid(target_img, masks, names, gif_frames, overlay_img, output_path):
-    """Create a final summary image: target | masks | rotation thumbnails | overlay."""
+    """Create a final summary image.
+
+    Layout (3 rows):
+      Row 1: [target image] [mask grid (4x2)]
+      Row 2: [rotation GIF thumbnails (4x2)]
+      Row 3: [overlay comparison (full width, SAM mask | projected GLB)]
+    """
     W_panel = 512
     H_panel = int(W_panel * target_img.size[1] / target_img.size[0])
 
-    # Layout: 2x2 grid
-    # [target image] [mask grid]
-    # [rotation gifs] [overlay]
-    grid_w = W_panel * 2
-    grid_h = H_panel * 2
-    grid = Image.new("RGB", (grid_w, grid_h), (30, 30, 30))
-
-    # Top-left: target
-    grid.paste(target_img.resize((W_panel, H_panel), Image.LANCZOS), (0, 0))
-
-    # Top-right: mask grid (use first frame of each mask)
     mask_cols = 4
     mask_rows = 2
     cell_w = W_panel // mask_cols
     cell_h = H_panel // mask_rows
+
+    grid_w = W_panel * 2
+    # Row 1: target + mask grid, Row 2: rotation thumbs, Row 3: overlay
+    row3_h = H_panel  # overlay row height
+    grid_h = H_panel + H_panel + row3_h
+    grid = Image.new("RGB", (grid_w, grid_h), (30, 30, 30))
+
+    # Row 1 left: target
+    grid.paste(target_img.resize((W_panel, H_panel), Image.LANCZOS), (0, 0))
+
+    # Row 1 right: mask grid (4x2)
     for i, name in enumerate(names):
         r, c = divmod(i, mask_cols)
         x = W_panel + c * cell_w
@@ -288,18 +360,21 @@ def create_summary_grid(target_img, masks, names, gif_frames, overlay_img, outpu
         ).convert("RGB").resize((cell_w, cell_h), Image.LANCZOS)
         grid.paste(mask_vis, (x, y))
 
-    # Bottom-left: rotation GIF first frames (4x2 grid)
+    # Row 2: rotation GIF first frames (across full width, 8 columns)
+    rot_cols = min(8, len(names))
+    rot_cell_w = grid_w // rot_cols
+    rot_cell_h = H_panel
     for i, name in enumerate(names):
-        r, c = divmod(i, mask_cols)
-        x = c * cell_w
-        y = H_panel + r * cell_h
+        x = i * rot_cell_w
+        y = H_panel
 
         if name in gif_frames and gif_frames[name]:
-            thumb = gif_frames[name][0].resize((cell_w, cell_h), Image.LANCZOS)
+            thumb = gif_frames[name][0].resize((rot_cell_w, rot_cell_h), Image.LANCZOS)
             grid.paste(thumb, (x, y))
 
-    # Bottom-right: overlay
-    grid.paste(overlay_img.resize((W_panel, H_panel), Image.LANCZOS), (W_panel, H_panel))
+    # Row 3: overlay comparison (full width)
+    ov_resized = overlay_img.resize((grid_w, row3_h), Image.LANCZOS)
+    grid.paste(ov_resized, (0, H_panel + H_panel))
 
     grid.save(output_path)
     print(f"[VIZ] Summary grid → {output_path}")
@@ -371,10 +446,11 @@ def main():
             print(f"[VIZ] {name}: rotation render failed: {e}")
             all_gif_frames[name] = []
 
-    # Step 3+4: 2D projection overlay
+    # Step 3+4: 2D projection overlay (SAM mask vs projected GLB)
     print("\n[VIZ] === Step 3+4: 2D Projection Overlay ===")
     overlay_path = os.path.join(output_dir, "overlay.png")
-    create_overlay(target_img, transforms, data_dir, overlay_path)
+    create_overlay(target_img, transforms, data_dir, overlay_path,
+                   masks=masks, names=names)
     overlay_img = Image.open(overlay_path)
 
     # Final summary grid
