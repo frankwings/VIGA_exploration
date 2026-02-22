@@ -364,7 +364,7 @@ def main():
         print(f"[VIZ] {name}: using {os.path.basename(glb_path)}")
         try:
             gif_path, frames = render_rotation_blender(
-                glb_path, name, output_dir, n_frames=12, resolution=256,
+                glb_path, name, output_dir, n_frames=12, resolution=1024,
             )
             all_gif_frames[name] = frames
         except Exception as e:
