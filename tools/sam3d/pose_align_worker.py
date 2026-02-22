@@ -266,17 +266,26 @@ class Transform3dSimple:
 
 
 def transform_and_export_glb(mesh_path, glb_path, quaternion, translation, scale,
-                             pbr_glb_path=None, aligned_pbr_path=None):
+                             pbr_glb_path=None, aligned_pbr_path=None,
+                             vertices_np=None, faces_np=None):
     """Transform mesh vertices from canonical Z-up to aligned PyTorch3D camera space.
 
     Also optionally transforms PBR GLB vertices (which are already in Y-up from to_glb).
+
+    If vertices_np/faces_np are provided, use them directly instead of loading
+    from mesh_path.  This avoids re-loading the full raw mesh (which can be
+    500K–2.3M vertices for TRELLIS2) and allows passing a pre-decimated version.
     """
     device = "cpu"
 
-    # Load raw mesh
-    data = np.load(mesh_path)
-    vertices = torch.tensor(data["vertices"], dtype=torch.float32, device=device)
-    faces = data["faces"]
+    # Use pre-loaded mesh if provided, otherwise load from NPZ
+    if vertices_np is not None and faces_np is not None:
+        vertices = torch.tensor(vertices_np, dtype=torch.float32, device=device)
+        faces = faces_np
+    else:
+        data = np.load(mesh_path)
+        vertices = torch.tensor(data["vertices"], dtype=torch.float32, device=device)
+        faces = data["faces"]
 
     # Apply R_zup_to_yup then S/R/T
     vertices_yup = vertices @ R_zup_to_yup.to(device)
@@ -453,7 +462,9 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
     if S_final.dim() == 1:
         S_final = S_final.unsqueeze(0)
 
-    # Export aligned GLB
+    # Export aligned GLB using the (possibly pre-decimated) mesh, not the raw NPZ.
+    # This keeps GLB files small enough for Blender to import (~1-3 MB instead of
+    # 18-81 MB from the full TRELLIS2 voxel decoder output).
     glb_path = obj["glb"]
     pbr_glb_path = obj.get("pbr_glb")
     aligned_pbr_path = obj.get("aligned_pbr")
@@ -461,6 +472,8 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
         mesh_path, glb_path, R_final, T_final, S_final,
         pbr_glb_path=pbr_glb_path,
         aligned_pbr_path=aligned_pbr_path,
+        vertices_np=vertices,
+        faces_np=faces,
     )
 
     # Build info dict — store the ISOTROPIC intrinsics that the optimizer
