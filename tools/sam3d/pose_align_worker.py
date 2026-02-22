@@ -371,11 +371,10 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
         mesh_verts_tensor, pointmap, mask_tensor, device=device
     )
 
-    # Prepare intrinsics (make focal length isotropic)
-    intr = intrinsics.clone()
-    fx, fy = intr[0, 0], intr[1, 1]
-    re_focal = min(fx, fy)
-    intr[0, 0], intr[1, 1] = re_focal, re_focal
+    # Pass original (non-isotropic) intrinsics to layout_post_optimization.
+    # The optimizer's renderer (PerspectiveCameras) supports anisotropic focal
+    # length natively.  Making fx=fy distorts the camera model and degrades
+    # alignment quality.  TRELLIS1's pipeline passes MoGe intrinsics as-is.
 
     # Pass pointmap directly — layout_post_optimization handles its own resize.
     # Do NOT pad-to-square with NaN then bilinear-resize, as bilinear interpolation
@@ -394,7 +393,7 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
                 scale,                    # (1, 3)
                 mask_tensor,              # (H, W)
                 point_map,                # (H, W, 3)
-                intr,                     # (3, 3)
+                intrinsics,               # (3, 3) — original MoGe intrinsics
                 min_size=518,
             )
         )
@@ -443,8 +442,8 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
     )
 
     # Build info dict — store the ISOTROPIC intrinsics that the optimizer
-    # actually used (fx=fy=min(fx,fy)), not the original non-isotropic ones.
-    # Projection and Blender scene render must use these same intrinsics.
+    # Store the same intrinsics that were passed to layout_post_optimization.
+    # Since we now pass original MoGe intrinsics (non-isotropic), store those.
     info = {
         "object_name": name,
         "glb_path": glb_path,
@@ -452,7 +451,7 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
         "rotation": R_final.squeeze().tolist(),
         "scale": S_final.squeeze().tolist(),
         "iou": float(final_iou),
-        "intrinsics": intr.cpu().tolist() if hasattr(intr, 'cpu') else intr,
+        "intrinsics": intrinsics.cpu().tolist() if hasattr(intrinsics, 'cpu') else intrinsics,
         "pointmap_shape": [pm_h, pm_w],
     }
 
