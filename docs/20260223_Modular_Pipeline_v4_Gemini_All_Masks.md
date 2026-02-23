@@ -1,7 +1,7 @@
 # Modular Pipeline v4 — Gemini VLM + All Masks Kept
 
 **Date:** 2026-02-23
-**Commits:** `e1d46c5` (IoU filter fix + keep all masks), `15c915b` (Gemini 2.5 Flash SDK), `2599397` (retry backoff)
+**Commits:** `e1d46c5` (IoU filter fix + keep all masks), `15c915b` (Gemini 2.5 Flash SDK), `2599397` (retry backoff), `e93d61a` (SS pose passthrough fix)
 **VM:** genesisforge-gpu (g2-standard-8, L4 24GB, us-central1-a)
 **Scene:** `data/static_scene/dining/target_resized.jpg` (1024 x 771)
 
@@ -78,45 +78,52 @@ Total: 649.0s (10.8 min), model load: ~34s.
 
 ---
 
-## Module 5: Register
+## Module 5: Register (with SS Pose Fix)
+
+### Bug Fix: SS Initial Pose Not Passed Through
+
+Commit `e93d61a` fixed a critical bug: `registration_2d3d.py`'s `main()` function was not copying `checkpoint_path` from the reconstruct manifest to the object entries passed to `run_pose_alignment()`. This meant `SS_pose=False` for all objects despite the SS pose data being available in the mesh NPZ. The optimizer fell back to identity rotation, converging to worse local minima.
 
 ### Per-Object IoU
 
-| Object | IoU | Scene Render | Notes |
-|---|---|---|---|
-| table | 0.4105 | Included | NEW — was background in v3 |
-| sofa | 0.2687 | Included | NEW — was background in v3 |
-| wooden_chair | -1.0 | **Excluded** | Failed alignment |
-| tablecloth | 0.4918 | Included | Comparable to v3 (0.4917) |
-| chair_cushion | 0.6876 | Included | Comparable to v3 (0.6909) |
-| armchair | 0.0765 | **Excluded** | Poor alignment |
-| neck_pillow_and_cushion | 0.7910 | Included | Comparable to v3 (0.8026) |
-| newspaper | 0.6964 | Included | Comparable to v3 (0.7023) |
-| plant_in_pot | 0.1289 | **Excluded** | Poor alignment |
-| placemat | 0.4200 | Included | Comparable to v3 (0.4231) |
-| **Avg (all 10)** | **0.396** | | |
-| **Avg (7 included)** | **0.538** | | |
-| **Avg (excl. new bg objects)** | **0.448** | | v3 was 0.473 |
+| Object | IoU (no SS) | IoU (with SS) | Scene Render | Notes |
+|---|---|---|---|---|
+| table | 0.41 | 0.40 | Included | NEW — was background in v3 |
+| sofa | 0.27 | 0.30 | Included | NEW — was background in v3 |
+| wooden_chair | -1.0 | -1.0 | **Excluded** | Failed alignment |
+| tablecloth | 0.49 | 0.48 | Included | |
+| chair_cushion | 0.69 | 0.69 | Included | |
+| armchair | 0.08 | **0.21** | Included | **Now included** (was excluded) |
+| neck_pillow_and_cushion | 0.79 | **0.89** | Included | +0.10 improvement |
+| newspaper | 0.70 | **0.79** | Included | +0.09 improvement |
+| plant_in_pot | 0.13 | **0.25** | Included | **Now included** (was excluded) |
+| placemat | 0.42 | **0.60** | Included | **+0.18 improvement** |
+| **Avg (all 10)** | 0.396 | **0.451** | | +0.055 |
+| **Avg (9 included)** | | **0.534** | | Only wooden_chair excluded |
 
-The two new objects (table, sofa) that were previously rejected as background now get reconstructed and registered. `table` achieves IoU=0.41, `sofa` achieves IoU=0.27. Both are included in the scene render.
-
-The IoU filter (`< 0.15`) correctly excludes 3 objects: `wooden_chair` (IoU=-1.0), `armchair` (0.077), `plant_in_pot` (0.129).
+With the SS pose fix, 9 of 10 objects are now included in the scene render (only `wooden_chair` excluded with IoU=-1.0). Previously 3 were excluded. Key improvements: `placemat` +0.18, `plant_in_pot` +0.12, `neck_pillow` +0.10, `armchair` +0.13.
 
 ---
 
-## Scene Renders
+## Scene Renders (with SS Pose Fix)
 
-### v4 Registration
+### v4 Registration (SS_pose=True)
+
+| Perspective Render | Flat Render |
+|---|---|
+| ![](test_results_images/modular_dining_v4_ss/scene_render.png) | ![](test_results_images/modular_dining_v4_ss/flat_scene_render.png) |
+
+### v4 Overlay Comparison (SS_pose=True)
+
+| Side-by-Side | Projection Overlay |
+|---|---|
+| ![](test_results_images/modular_dining_v4_ss/side_by_side.png) | ![](test_results_images/modular_dining_v4_ss/projection_overlay.png) |
+
+### v4 Registration (SS_pose=False, before fix)
 
 | Perspective Render | Flat Render |
 |---|---|
 | ![](test_results_images/modular_dining_v4/scene_render.png) | ![](test_results_images/modular_dining_v4/flat_scene_render.png) |
-
-### v4 Overlay Comparison
-
-| Side-by-Side | Projection Overlay |
-|---|---|
-| ![](test_results_images/modular_dining_v4/side_by_side.png) | ![](test_results_images/modular_dining_v4/projection_overlay.png) |
 
 ---
 
@@ -124,16 +131,16 @@ The IoU filter (`< 0.15`) correctly excludes 3 objects: `wooden_chair` (IoU=-1.0
 
 | Object | IoU | Y-Rotation |
 |---|---|---|
-| table | 0.41 | ![](test_results_images/modular_dining_v4/rotation_gifs/table_y_rotation.gif) |
-| sofa | 0.27 | ![](test_results_images/modular_dining_v4/rotation_gifs/sofa_y_rotation.gif) |
-| wooden_chair | -1.0 | ![](test_results_images/modular_dining_v4/rotation_gifs/wooden_chair_y_rotation.gif) |
-| tablecloth | 0.49 | ![](test_results_images/modular_dining_v4/rotation_gifs/tablecloth_y_rotation.gif) |
-| chair_cushion | 0.69 | ![](test_results_images/modular_dining_v4/rotation_gifs/chair_cushion_y_rotation.gif) |
-| armchair | 0.08 | ![](test_results_images/modular_dining_v4/rotation_gifs/armchair_y_rotation.gif) |
-| neck_pillow_and_cushion | 0.79 | ![](test_results_images/modular_dining_v4/rotation_gifs/neck_pillow_and_cushion_y_rotation.gif) |
-| newspaper | 0.70 | ![](test_results_images/modular_dining_v4/rotation_gifs/newspaper_y_rotation.gif) |
-| plant_in_pot | 0.13 | ![](test_results_images/modular_dining_v4/rotation_gifs/plant_in_pot_y_rotation.gif) |
-| placemat | 0.42 | ![](test_results_images/modular_dining_v4/rotation_gifs/placemat_y_rotation.gif) |
+| table | 0.40 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/table_y_rotation.gif) |
+| sofa | 0.30 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/sofa_y_rotation.gif) |
+| wooden_chair | -1.0 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/wooden_chair_y_rotation.gif) |
+| tablecloth | 0.48 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/tablecloth_y_rotation.gif) |
+| chair_cushion | 0.69 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/chair_cushion_y_rotation.gif) |
+| armchair | 0.21 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/armchair_y_rotation.gif) |
+| neck_pillow_and_cushion | 0.89 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/neck_pillow_and_cushion_y_rotation.gif) |
+| newspaper | 0.79 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/newspaper_y_rotation.gif) |
+| plant_in_pot | 0.25 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/plant_in_pot_y_rotation.gif) |
+| placemat | 0.60 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/placemat_y_rotation.gif) |
 
 ---
 
@@ -156,6 +163,7 @@ The IoU filter (`< 0.15`) correctly excludes 3 objects: `wooden_chair` (IoU=-1.0
 2. **VLM naming with Gemini**: No OpenAI dependency. Gemini 2.5 Flash provides descriptive names for all objects including background regions.
 3. **IoU filter fix**: Objects with IoU=-1.0 (failed alignment) are now correctly excluded from the scene render, preventing visual corruption in overlays.
 4. **Retry logic**: Rate limit handling with exponential backoff ensures all objects get proper names even with free tier quotas.
+5. **SS pose passthrough fix**: `registration_2d3d.py` now passes `checkpoint_path` from the reconstruct manifest through to the pose alignment worker, enabling TRELLIS SS initial poses. This improved average IoU from 0.396 to 0.451 and brought 2 more objects above the inclusion threshold.
 
 ---
 
@@ -166,3 +174,4 @@ The IoU filter (`< 0.15`) correctly excludes 3 objects: `wooden_chair` (IoU=-1.0
 | `e1d46c5` | Switch recognize to Gemini, keep all masks, fix IoU filter |
 | `15c915b` | Switch recognize to google-genai SDK with gemini-2.5-flash |
 | `2599397` | Add retry with backoff for Gemini rate limits |
+| `e93d61a` | Fix: pass checkpoint_path through main() to pose alignment |
