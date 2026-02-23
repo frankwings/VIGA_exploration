@@ -234,7 +234,7 @@ def render_scene_overlay(output_dir: str, scene_image: str,
     """Render 3D scene with Blender and create overlay comparisons.
 
     Produces two sets of visualizations:
-      1. Vertex-color textured render (actual TRELLIS colors):
+      1. Textured render (native PBR materials from TRELLIS GLBs):
          viz/scene_render.png, viz/projection_overlay.png, viz/side_by_side.png
       2. Flat-shaded render (distinct colors per object, for alignment eval):
          viz/flat_scene_render.png, viz/flat_projection_overlay.png,
@@ -269,13 +269,13 @@ def render_scene_overlay(output_dir: str, scene_image: str,
 
     render_script = str(ROOT / "render_full_scene.py")
 
-    # Render 1: Vertex-color textured (actual TRELLIS colors)
+    # Render 1: Textured (native PBR materials from TRELLIS GLBs)
     render_path = os.path.join(viz_dir, "scene_render.png")
     log_path = os.path.join(output_dir, "blender_scene.log")
-    print(f"{TAG} Rendering 3D scene with vertex colors...")
+    print(f"{TAG} Rendering textured 3D scene...")
     if _run_blender_render(blender_cmd, render_script, output_dir,
                            moge_npz_path, render_path, log_path,
-                           ["--vertex-colors"]):
+                           []):
         _make_overlay_images(render_path, scene_image, viz_dir)
     else:
         print(f"{TAG} Textured render failed or produced no output")
