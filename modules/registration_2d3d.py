@@ -74,13 +74,17 @@ def run_pose_alignment(scene_image: str, objects: list, output_dir: str) -> dict
 
     for obj in objects:
         name = obj["name"]
-        pose_manifest["objects"].append({
+        entry = {
             "name": name,
             "mesh": obj["mesh_path"],
             "mask": obj["npy_path"],
             "glb": os.path.join(output_dir, f"{name}.glb"),
             "info": os.path.join(output_dir, f"{name}_info.json"),
-        })
+        }
+        # Pass original textured GLB so alignment preserves textures
+        if obj.get("canonical_glb"):
+            entry["canonical_glb"] = obj["canonical_glb"]
+        pose_manifest["objects"].append(entry)
 
     manifest_path = os.path.join(output_dir, "pose_manifest.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
@@ -299,11 +303,15 @@ def main() -> None:
         if rec_obj is None:
             print(f"{TAG} WARNING: {name} not in recognize manifest, skipping")
             continue
-        objects.append({
+        obj_entry = {
             "name": name,
             "mesh_path": recon_obj["mesh_path"],
             "npy_path": rec_obj["npy_path"],
-        })
+        }
+        # Pass original textured GLB for texture-preserving alignment
+        if recon_obj.get("glb_path"):
+            obj_entry["canonical_glb"] = recon_obj["glb_path"]
+        objects.append(obj_entry)
 
     print(f"{TAG} Scene image: {scene_image}")
     print(f"{TAG} {len(objects)} objects to align")

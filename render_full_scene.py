@@ -79,22 +79,22 @@ def setup_lighting():
     bg = world.node_tree.nodes.get("Background")
     if bg is None:
         bg = world.node_tree.nodes.new(type='ShaderNodeBackground')
-    bg.inputs['Strength'].default_value = 1.0
-    bg.inputs['Color'].default_value = (0.85, 0.85, 0.85, 1.0)
+    bg.inputs['Strength'].default_value = 0.5
+    bg.inputs['Color'].default_value = (1.0, 1.0, 1.0, 1.0)
     out = world.node_tree.nodes.get("World Output")
     if out:
         world.node_tree.links.new(bg.outputs['Background'], out.inputs['Surface'])
 
-    # Key light
+    # Key light — moderate to not wash out textures
     bpy.ops.object.light_add(type='SUN')
     sun = bpy.context.active_object
-    sun.data.energy = 3.0
+    sun.data.energy = 2.0
     sun.rotation_euler = (math.radians(50), 0, math.radians(30))
 
-    # Fill light
+    # Fill light — soft fill from opposite side
     bpy.ops.object.light_add(type='AREA', location=(2, 2, 2))
     area = bpy.context.active_object
-    area.data.energy = 50.0
+    area.data.energy = 30.0
     area.data.size = 3.0
 
 

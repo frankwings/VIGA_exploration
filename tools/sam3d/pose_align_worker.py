@@ -266,8 +266,13 @@ class Transform3dSimple:
 
 
 def transform_and_export_glb(mesh_path, glb_path, quaternion, translation, scale,
-                             pbr_glb_path=None, aligned_pbr_path=None):
+                             pbr_glb_path=None, aligned_pbr_path=None,
+                             canonical_glb_path=None):
     """Transform mesh vertices from canonical Z-up to aligned PyTorch3D camera space.
+
+    If canonical_glb_path is provided, loads the original textured GLB and applies
+    the transform to its vertices — preserving all UV maps, materials, and textures.
+    Otherwise falls back to creating a geometry-only GLB from the NPZ.
 
     Also optionally transforms PBR GLB vertices (which are already in Y-up from to_glb).
     Dense TRELLIS2 meshes (500K–2.3M vertices) are decimated to MAX_FACES_FOR_EXPORT
@@ -280,21 +285,7 @@ def transform_and_export_glb(mesh_path, glb_path, quaternion, translation, scale
     vertices = torch.tensor(data["vertices"], dtype=torch.float32, device=device)
     faces = data["faces"]
 
-    # Decimate dense meshes for export (separate from alignment decimation)
-    if faces.shape[0] > MAX_FACES_FOR_EXPORT:
-        import open3d as o3d
-        mesh_o3d = o3d.geometry.TriangleMesh()
-        mesh_o3d.vertices = o3d.utility.Vector3dVector(vertices.numpy())
-        mesh_o3d.triangles = o3d.utility.Vector3iVector(faces)
-        mesh_o3d.remove_duplicated_vertices()
-        mesh_o3d.remove_degenerate_triangles()
-        mesh_o3d = mesh_o3d.simplify_quadric_decimation(MAX_FACES_FOR_EXPORT)
-        vertices = torch.tensor(np.asarray(mesh_o3d.vertices), dtype=torch.float32, device=device)
-        faces = np.asarray(mesh_o3d.triangles).astype(np.int32)
-        print(f"[POSE] Export decimated to {faces.shape[0]} faces, {vertices.shape[0]} verts",
-              flush=True)
-
-    # Apply R_zup_to_yup then S/R/T
+    # Build the S/R/T transform
     vertices_yup = vertices @ R_zup_to_yup.to(device)
     R_mat = quaternion_to_matrix(quaternion.to(device))
     if R_mat.dim() == 3:
@@ -309,15 +300,61 @@ def transform_and_export_glb(mesh_path, glb_path, quaternion, translation, scale
 
     tfm = Transform3dSimple(dtype=torch.float32, device=device)
     tfm = tfm.scale(s).rotate(R_mat).translate(t[0], t[1], t[2])
-    vertices_aligned = tfm.transform_points(vertices_yup.unsqueeze(0))[0]
 
-    # Export simple vertex-color GLB
-    mesh = trimesh.Trimesh(
-        vertices=vertices_aligned.numpy().astype(np.float32),
-        faces=faces,
-    )
     os.makedirs(os.path.dirname(glb_path), exist_ok=True)
-    mesh.export(glb_path)
+
+    # Try to use original textured GLB for export (preserves UV/materials)
+    if canonical_glb_path and os.path.exists(canonical_glb_path):
+        try:
+            scene = trimesh.load(canonical_glb_path)
+            if isinstance(scene, trimesh.Scene):
+                for geom_name, geom in scene.geometry.items():
+                    if hasattr(geom, 'vertices'):
+                        v = torch.tensor(geom.vertices, dtype=torch.float32, device=device)
+                        # Canonical GLB is in Z-up; apply R_zup_to_yup then S/R/T
+                        v_yup = v @ R_zup_to_yup.to(device)
+                        v_aligned = tfm.transform_points(v_yup.unsqueeze(0))[0]
+                        geom.vertices = v_aligned.numpy().astype(np.float32)
+                scene.export(glb_path)
+            else:
+                v = torch.tensor(scene.vertices, dtype=torch.float32, device=device)
+                v_yup = v @ R_zup_to_yup.to(device)
+                v_aligned = tfm.transform_points(v_yup.unsqueeze(0))[0]
+                scene.vertices = v_aligned.numpy().astype(np.float32)
+                scene.export(glb_path)
+            print(f"[POSE] Exported textured GLB → {glb_path}", flush=True)
+        except Exception as e:
+            print(f"[POSE] WARNING: Textured GLB export failed ({e}), falling back to NPZ",
+                  flush=True)
+            canonical_glb_path = None  # Fall through to NPZ path
+
+    if not canonical_glb_path or not os.path.exists(str(canonical_glb_path) if canonical_glb_path else ""):
+        # Fallback: geometry-only GLB from NPZ
+        # Decimate dense meshes for export
+        if faces.shape[0] > MAX_FACES_FOR_EXPORT:
+            import open3d as o3d
+            mesh_o3d = o3d.geometry.TriangleMesh()
+            mesh_o3d.vertices = o3d.utility.Vector3dVector(vertices.numpy())
+            mesh_o3d.triangles = o3d.utility.Vector3iVector(faces)
+            mesh_o3d.remove_duplicated_vertices()
+            mesh_o3d.remove_degenerate_triangles()
+            mesh_o3d = mesh_o3d.simplify_quadric_decimation(MAX_FACES_FOR_EXPORT)
+            vertices = torch.tensor(np.asarray(mesh_o3d.vertices), dtype=torch.float32, device=device)
+            faces = np.asarray(mesh_o3d.triangles).astype(np.int32)
+            print(f"[POSE] Export decimated to {faces.shape[0]} faces, {vertices.shape[0]} verts",
+                  flush=True)
+
+        vertices_aligned = tfm.transform_points(vertices_yup.unsqueeze(0))[0]
+
+        # Include vertex colors if available
+        vc = data.get("vertex_colors")
+        mesh = trimesh.Trimesh(
+            vertices=vertices_aligned.numpy().astype(np.float32),
+            faces=faces,
+            vertex_colors=vc,
+        )
+        mesh.export(glb_path)
+        print(f"[POSE] Exported geometry-only GLB → {glb_path}", flush=True)
 
     # Also transform PBR GLB if provided
     if pbr_glb_path and aligned_pbr_path and os.path.exists(pbr_glb_path):
@@ -474,10 +511,12 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
     glb_path = obj["glb"]
     pbr_glb_path = obj.get("pbr_glb")
     aligned_pbr_path = obj.get("aligned_pbr")
+    canonical_glb_path = obj.get("canonical_glb")
     transform_and_export_glb(
         mesh_path, glb_path, R_final, T_final, S_final,
         pbr_glb_path=pbr_glb_path,
         aligned_pbr_path=aligned_pbr_path,
+        canonical_glb_path=canonical_glb_path,
     )
 
     # Build info dict — store the ISOTROPIC intrinsics that the optimizer
