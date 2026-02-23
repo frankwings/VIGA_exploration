@@ -8,7 +8,7 @@ Usage:
     python modules/recognize.py \
         --input-manifest <output/segment/segment_manifest.json> \
         --output-dir <output/recognize/> \
-        --model gemini-2.0-flash
+        --model gemini-2.5-flash
 
 Output:
     recognize_manifest.json       — manifest listing named objects
@@ -16,7 +16,7 @@ Output:
     {name}.png                    — renamed masked RGBA images
     viz/named_objects_grid.png    — grid with object name labels
 
-Conda env: agent (Python 3.10, OpenAI-compatible client)
+Conda env: agent (Python 3.10, google-genai SDK)
 """
 
 import argparse
@@ -35,8 +35,6 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(ROOT)
 sys.path.append(os.path.join(ROOT, "utils"))
 
-from common import build_client, get_image_base64
-
 
 # ---------------------------------------------------------------------------
 # Naming helpers
@@ -50,59 +48,103 @@ def sanitize_filename(name: str) -> str:
     return sanitized or "object"
 
 
+def _build_prompt(existing_names: Optional[List[str]] = None) -> str:
+    """Build the VLM prompt text."""
+    existing_str = ""
+    if existing_names:
+        existing_str = (
+            f"\n\nAlready identified objects (do not use these names): "
+            f"{', '.join(existing_names)}"
+        )
+    return (
+        "Look at the first image showing a segmented object, and the "
+        "second image showing the original image that contains this "
+        "object. Identify what this object is and provide a concise, "
+        "descriptive name for it (e.g., 'red_chair', 'wooden_table'). "
+        "If the first image is not clear, check the second image to "
+        "get the whole context.\n\n"
+        "If the mask covers background elements (walls, floor, ceiling), "
+        "still describe what you see (e.g., 'floor_area', 'wall_section', "
+        "'ceiling_light'). Always provide a descriptive name.\n\n"
+        "Use only lowercase letters, numbers, and underscores. The "
+        "name should be a single word or short phrase (2-3 words max, "
+        f"use underscores to separate words).{existing_str}\n\n"
+        "Respond with ONLY the object name, nothing else."
+    )
+
+
+def _get_name_gemini(
+    image_path: str,
+    ori_img_path: str,
+    model: str,
+    existing_names: List[str],
+    api_key: str,
+) -> str:
+    """Call Gemini via google-genai SDK."""
+    from google import genai
+
+    client = genai.Client(api_key=api_key)
+    mask_img = Image.open(image_path).convert("RGB")
+    ori_img = Image.open(ori_img_path).convert("RGB")
+    prompt = _build_prompt(existing_names)
+
+    resp = client.models.generate_content(
+        model=model,
+        contents=[mask_img, ori_img, prompt],
+    )
+    return resp.text.strip()
+
+
+def _get_name_openai(
+    image_path: str,
+    ori_img_path: str,
+    model: str,
+    existing_names: List[str],
+) -> str:
+    """Call VLM via OpenAI-compatible client (GPT-4o, etc.)."""
+    from common import build_client, get_image_base64
+
+    image_b64 = get_image_base64(image_path)
+    ori_img_b64 = get_image_base64(ori_img_path)
+    client = build_client(model)
+    prompt = _build_prompt(existing_names)
+
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": image_b64}},
+                {"type": "image_url", "image_url": {"url": ori_img_b64}},
+                {"type": "text", "text": prompt},
+            ],
+        }
+    ]
+    response = client.chat.completions.create(model=model, messages=messages)
+    return response.choices[0].message.content.strip()
+
+
 def get_object_name_from_vlm(
     image_path: str,
     ori_img_path: str,
-    model: str = "gemini-2.0-flash",
+    model: str = "gemini-2.5-flash",
     existing_names: Optional[List[str]] = None,
+    api_key: Optional[str] = None,
 ) -> str:
     """Use a VLM to identify the object in an image and return a unique name."""
     if existing_names is None:
         existing_names = []
 
     try:
-        image_b64 = get_image_base64(image_path)
-        ori_img_b64 = get_image_base64(ori_img_path)
-        client = build_client(model)
-
-        existing_str = ""
-        if existing_names:
-            existing_str = (
-                f"\n\nAlready identified objects (do not use these names): "
-                f"{', '.join(existing_names)}"
+        if "gemini" in model.lower() and api_key:
+            raw_name = _get_name_gemini(
+                image_path, ori_img_path, model, existing_names, api_key
+            )
+        else:
+            raw_name = _get_name_openai(
+                image_path, ori_img_path, model, existing_names
             )
 
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": image_b64}},
-                    {"type": "image_url", "image_url": {"url": ori_img_b64}},
-                    {
-                        "type": "text",
-                        "text": (
-                            "Look at the first image showing a segmented object, and the "
-                            "second image showing the original image that contains this "
-                            "object. Identify what this object is and provide a concise, "
-                            "descriptive name for it (e.g., 'red_chair', 'wooden_table'). "
-                            "If the first image is not clear, check the second image to "
-                            "get the whole context.\n\n"
-                            "If the mask covers background elements (walls, floor, ceiling), "
-                            "still describe what you see (e.g., 'floor_area', 'wall_section', "
-                            "'ceiling_light'). Always provide a descriptive name.\n\n"
-                            "Use only lowercase letters, numbers, and underscores. The "
-                            "name should be a single word or short phrase (2-3 words max, "
-                            f"use underscores to separate words).{existing_str}\n\n"
-                            "Respond with ONLY the object name, nothing else."
-                        ),
-                    },
-                ],
-            }
-        ]
-
-        response = client.chat.completions.create(model=model, messages=messages)
-        object_name = response.choices[0].message.content.strip()
-        object_name = object_name.strip("\"'")
+        object_name = raw_name.strip("\"'")
         object_name = re.sub(r"\s+", "_", object_name)
         object_name = sanitize_filename(object_name)
 
@@ -155,12 +197,26 @@ def main() -> None:
     parser.add_argument("--input-manifest", required=True,
                         help="Path to segment_manifest.json from Module 1")
     parser.add_argument("--output-dir", required=True, help="Output directory")
-    parser.add_argument("--model", default="gemini-2.0-flash", help="VLM model for naming")
+    parser.add_argument("--model", default="gemini-2.5-flash",
+                        help="VLM model for naming (default: gemini-2.5-flash)")
+    parser.add_argument("--gemini-api-key", default=None,
+                        help="Gemini API key (reads from _api_keys.py if not set)")
     args = parser.parse_args()
 
     output_dir = os.path.abspath(args.output_dir)
     viz_dir = os.path.join(output_dir, "viz")
     os.makedirs(viz_dir, exist_ok=True)
+
+    # Resolve Gemini API key
+    api_key = args.gemini_api_key
+    if api_key is None and "gemini" in args.model.lower():
+        try:
+            from _api_keys import GEMINI_API_KEY
+            api_key = GEMINI_API_KEY
+        except ImportError:
+            api_key = os.environ.get("GEMINI_API_KEY")
+    if "gemini" in args.model.lower() and not api_key:
+        print("[RECOGNIZE] WARNING: No Gemini API key found, VLM calls will fail")
 
     # Read segment manifest
     with open(args.input_manifest, "r", encoding="utf-8") as f:
@@ -195,7 +251,8 @@ def main() -> None:
 
         # Call VLM
         name = get_object_name_from_vlm(
-            png_path, image_path, model=args.model, existing_names=object_names
+            png_path, image_path, model=args.model,
+            existing_names=object_names, api_key=api_key
         )
 
         object_names.append(name)

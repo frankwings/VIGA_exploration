@@ -80,7 +80,7 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True, help="Root output directory")
     parser.add_argument("--trellis-version", choices=["1", "2"], default="1",
                         help="TRELLIS version (1 or 2)")
-    parser.add_argument("--vlm-model", default="gemini-2.0-flash",
+    parser.add_argument("--vlm-model", default="gemini-2.5-flash",
                         help="VLM model for object naming")
     parser.add_argument("--blender-command", default="/usr/local/bin/blender",
                         help="Path to Blender executable")
