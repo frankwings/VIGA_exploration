@@ -250,7 +250,11 @@ def render_scene_overlay(output_dir: str, scene_image: str,
         print(f"{TAG} No object_transforms.json, skipping scene render")
         return
 
-    # Get intrinsics from monodepth manifest (normalized) and convert to pixels
+    # Get intrinsics from monodepth manifest (normalized) and convert to pixels.
+    # IMPORTANT: Use isotropic focal length (min(fx,fy)) to match what
+    # layout_post_optimization uses internally.  TRELLIS1's
+    # run_post_optimization() forces fx=fy=min(fx,fy) before optimizing,
+    # so the rendering camera must use the same focal length model.
     intrinsics = depth_manifest.get("intrinsics")
     pm_shape = depth_manifest.get("pointmap_shape", [0, 0])
     if not intrinsics or pm_shape == [0, 0]:
@@ -258,10 +262,15 @@ def render_scene_overlay(output_dir: str, scene_image: str,
         return
 
     pm_h, pm_w = pm_shape
-    fx = intrinsics[0][0] * pm_w
-    fy = intrinsics[1][1] * pm_h
+    fx_norm = intrinsics[0][0]
+    fy_norm = intrinsics[1][1]
+    re_focal = min(fx_norm, fy_norm)
+    fx = re_focal * pm_w
+    fy = re_focal * pm_h
     cx = intrinsics[0][2] * pm_w
     cy = intrinsics[1][2] * pm_h
+    print(f"{TAG} Render intrinsics: fx_norm={fx_norm:.4f} fy_norm={fy_norm:.4f} "
+          f"→ isotropic {re_focal:.4f} → fx_px={fx:.1f} fy_px={fy:.1f}")
 
     # Save intrinsics as NPZ for render_full_scene.py
     moge_npz_path = os.path.join(output_dir, "moge_intrinsics.npz")
