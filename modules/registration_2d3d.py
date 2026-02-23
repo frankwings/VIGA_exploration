@@ -308,9 +308,9 @@ def main() -> None:
             "mesh_path": recon_obj["mesh_path"],
             "npy_path": rec_obj["npy_path"],
         }
-        # Pass original textured GLB for texture-preserving alignment
-        if recon_obj.get("glb_path"):
-            obj_entry["canonical_glb"] = recon_obj["glb_path"]
+        # Pass canonical (pre-transform, Z-up) GLB for texture-preserving alignment
+        if recon_obj.get("canonical_glb_path"):
+            obj_entry["canonical_glb"] = recon_obj["canonical_glb_path"]
         objects.append(obj_entry)
 
     print(f"{TAG} Scene image: {scene_image}")

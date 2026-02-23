@@ -220,6 +220,13 @@ def process_single_object(inference, obj, scene_image, save_checkpoint):
         np.savez(ckpt_path, **save_dict)
         print(f"[checkpoint] Saved: {ckpt_path}", flush=True)
 
+    # Export canonical GLB (raw Z-up frame, with textures) before transforming
+    canonical_glb_path = obj.get("canonical_glb")
+    if canonical_glb_path:
+        os.makedirs(os.path.dirname(canonical_glb_path), exist_ok=True)
+        mesh.export(canonical_glb_path)
+        print(f"[canonical] Saved: {canonical_glb_path}", flush=True)
+
     # Transform vertices
     S = output["scale"][0].cpu().float()
     T = output["translation"][0].cpu().float()

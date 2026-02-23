@@ -140,6 +140,7 @@ def reconstruct_trellis1(manifest_data: dict, scene_image: str,
             "image": image_path,
             "mask": obj["npy_path"],
             "glb": os.path.join(output_dir, f"{name}.glb"),
+            "canonical_glb": os.path.join(output_dir, f"{name}_canonical.glb"),
             "info": os.path.join(output_dir, f"{name}_info.json"),
             "checkpoint": os.path.join(output_dir, f"{name}_checkpoint.npz"),
         })
@@ -202,8 +203,10 @@ def reconstruct_trellis1(manifest_data: dict, scene_image: str,
                     save_dict["vertex_colors"] = vc
                 np.savez(mesh_npz_path, **save_dict)
 
+                canonical_glb = os.path.join(output_dir, f"{name}_canonical.glb")
                 results[name] = {
                     "glb_path": glb_path if os.path.exists(glb_path) else None,
+                    "canonical_glb_path": canonical_glb if os.path.exists(canonical_glb) else None,
                     "mesh_path": mesh_npz_path,
                     "vertices_count": int(verts.shape[0]),
                     "faces_count": int(faces.shape[0]),
@@ -211,8 +214,9 @@ def reconstruct_trellis1(manifest_data: dict, scene_image: str,
                 }
                 glb_mb = os.path.getsize(glb_path) / (1024*1024) if os.path.exists(glb_path) else 0
                 color_str = "with colors" if vc is not None else "no colors"
+                canonical_str = "canonical OK" if results[name]["canonical_glb_path"] else "no canonical"
                 print(f"{TAG} {name}: OK ({results[name]['vertices_count']} verts, "
-                      f"{results[name]['faces_count']} faces, {color_str}, GLB {glb_mb:.1f}MB)")
+                      f"{results[name]['faces_count']} faces, {color_str}, {canonical_str}, GLB {glb_mb:.1f}MB)")
             else:
                 print(f"{TAG} {name}: checkpoint missing vertices/faces")
                 results[name] = None
@@ -359,14 +363,17 @@ def main() -> None:
         name = obj["name"]
         r = results.get(name)
         if r and r.get("mesh_path"):
-            obj_entries.append({
+            entry = {
                 "name": name,
                 "glb_path": r["glb_path"],
                 "mesh_path": r["mesh_path"],
                 "vertices_count": r["vertices_count"],
                 "faces_count": r["faces_count"],
                 "has_colors": r.get("has_colors", False),
-            })
+            }
+            if r.get("canonical_glb_path"):
+                entry["canonical_glb_path"] = r["canonical_glb_path"]
+            obj_entries.append(entry)
 
     manifest = {
         "trellis_version": args.trellis_version,
