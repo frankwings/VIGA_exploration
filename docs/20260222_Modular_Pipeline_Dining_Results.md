@@ -293,11 +293,21 @@ The root cause: Module 4 was saving the SS checkpoint data but Module 5 was not 
 |---|---|
 | ![](test_results_images/modular_dining_v2/registration_v2_scene_render.png) | ![](test_results_images/modular_dining_v2/registration_v2_flat_scene_render.png) |
 
-### v1 Overlay Comparison
+### v1 Overlay Comparison (Before Fix)
 
 | Side-by-Side | Projection Overlay |
 |---|---|
 | ![](test_results_images/modular_dining_v2/registration_v1_side_by_side.png) | ![](test_results_images/modular_dining_v2/registration_v1_projection_overlay.png) |
+
+### v2 Overlay Comparison (After Fix)
+
+| Side-by-Side | Projection Overlay |
+|---|---|
+| ![](test_results_images/modular_dining_v2/registration_v2_side_by_side.png) | ![](test_results_images/modular_dining_v2/registration_v2_projection_overlay.png) |
+
+| Flat Projection Overlay |
+|---|
+| ![](test_results_images/modular_dining_v2/registration_v2_flat_projection_overlay.png) |
 
 ---
 
