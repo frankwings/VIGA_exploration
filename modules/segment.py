@@ -1,7 +1,8 @@
 """Module 1: SAM Segmentation.
 
-Runs SAM ViT-H on a target image and outputs all detected masks with
-minimal filtering (only removes tiny noise masks and obvious backgrounds).
+Runs SAM ViT-H on a target image and filters masks using an occupancy-based
+selection process (same as the original SAM3D pipeline). Produces high-quality,
+non-overlapping masks sorted by area * confidence.
 
 Usage:
     python modules/segment.py --image <target.jpg> --output-dir <output/segment/>
@@ -35,21 +36,31 @@ sys.path.append(os.path.join(ROOT, "utils", "third_party", "sam"))
 
 
 # ---------------------------------------------------------------------------
-# Mask filtering
+# Mask filtering (from original SAM3D pipeline)
 # ---------------------------------------------------------------------------
 
 def filter_masks(raw_masks: List[Dict[str, Any]],
-                 min_area_ratio: float = 0.005,
-                 max_area_ratio: float = 0.60) -> List[Dict[str, Any]]:
-    """Keep all masks except tiny noise and obvious background.
+                 max_masks: int = 15,
+                 min_area_ratio: float = 0.01,
+                 max_area_ratio: float = 0.50,
+                 min_unique_ratio: float = 0.70) -> List[Dict[str, Any]]:
+    """Occupancy-based mask selection (matches original SAM3D pipeline).
+
+    Steps:
+      1. Remove masks smaller than min_area_ratio or larger than max_area_ratio.
+      2. Sort by area * predicted_iou (combined quality score).
+      3. Greedily select masks that add >= min_unique_ratio novel pixels.
+      4. Stop at max_masks.
 
     Args:
         raw_masks: SAM output list of mask dicts.
+        max_masks: Maximum number of masks to keep.
         min_area_ratio: Discard masks smaller than this fraction of the image.
-        max_area_ratio: Discard masks larger than this fraction of the image.
+        max_area_ratio: Discard masks larger than this fraction (background).
+        min_unique_ratio: Require this fraction of a mask's pixels to be new.
 
     Returns:
-        Filtered list, sorted by area descending.
+        Filtered list of mask dicts.
     """
     if not raw_masks:
         return []
@@ -58,9 +69,38 @@ def filter_masks(raw_masks: List[Dict[str, Any]],
     min_area = image_area * min_area_ratio
     max_area = image_area * max_area_ratio
 
-    kept = [m for m in raw_masks if min_area < m["area"] < max_area]
-    kept.sort(key=lambda m: m["area"], reverse=True)
-    return kept
+    # Pre-filter by area
+    candidates = [m for m in raw_masks if min_area < m["area"] < max_area]
+    if not candidates:
+        return []
+
+    # Sort by combined score: area * predicted_iou
+    candidates.sort(key=lambda x: x["area"] * x.get("predicted_iou", 0.5),
+                    reverse=True)
+
+    # Greedy occupancy-based selection
+    height, width = candidates[0]["segmentation"].shape
+    occupancy = np.zeros((height, width), dtype=bool)
+    selected = []
+
+    for mask_data in candidates:
+        seg = mask_data["segmentation"]
+        mask_area = np.count_nonzero(seg)
+        if mask_area == 0:
+            continue
+
+        # Unique area: pixels not already claimed by a previous mask
+        unique = np.logical_and(seg, ~occupancy)
+        unique_ratio = np.count_nonzero(unique) / mask_area
+
+        if unique_ratio >= min_unique_ratio:
+            selected.append(mask_data)
+            occupancy = np.logical_or(occupancy, seg)
+
+        if len(selected) >= max_masks:
+            break
+
+    return selected
 
 
 # ---------------------------------------------------------------------------
@@ -129,10 +169,20 @@ def main() -> None:
     parser.add_argument("--image", required=True, help="Path to input image")
     parser.add_argument("--output-dir", required=True, help="Output directory")
     parser.add_argument("--checkpoint", default=None, help="SAM ViT-H checkpoint path")
-    parser.add_argument("--min-area-ratio", type=float, default=0.005,
-                        help="Min mask area as fraction of image (default 0.5%%)")
-    parser.add_argument("--max-area-ratio", type=float, default=0.60,
-                        help="Max mask area as fraction of image (default 60%%)")
+    # SAM quality parameters
+    parser.add_argument("--pred-iou-thresh", type=float, default=0.88,
+                        help="SAM predicted IoU threshold (default 0.88)")
+    parser.add_argument("--stability-score-thresh", type=float, default=0.95,
+                        help="SAM stability score threshold (default 0.95)")
+    # Post-generation filtering
+    parser.add_argument("--max-masks", type=int, default=15,
+                        help="Max masks to keep after filtering (default 15)")
+    parser.add_argument("--min-area-ratio", type=float, default=0.01,
+                        help="Min mask area as fraction of image (default 1%%)")
+    parser.add_argument("--max-area-ratio", type=float, default=0.50,
+                        help="Max mask area as fraction of image (default 50%%)")
+    parser.add_argument("--min-unique-ratio", type=float, default=0.70,
+                        help="Min unique pixel ratio for occupancy filter (default 70%%)")
     args = parser.parse_args()
 
     if args.checkpoint is None:
@@ -147,6 +197,11 @@ def main() -> None:
     image_path = os.path.abspath(args.image)
     print(f"[SEGMENT] Image: {image_path}")
     print(f"[SEGMENT] Output: {output_dir}")
+    print(f"[SEGMENT] SAM params: pred_iou_thresh={args.pred_iou_thresh}, "
+          f"stability_score_thresh={args.stability_score_thresh}")
+    print(f"[SEGMENT] Filter: max_masks={args.max_masks}, "
+          f"area=[{args.min_area_ratio:.1%}, {args.max_area_ratio:.1%}], "
+          f"unique_ratio={args.min_unique_ratio:.0%}")
 
     # Load image
     image_bgr = cv2.imread(image_path)
@@ -157,7 +212,7 @@ def main() -> None:
     h, w = image_rgb.shape[:2]
     print(f"[SEGMENT] Image size: {w}x{h}")
 
-    # Initialize SAM
+    # Initialize SAM with quality thresholds
     from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -165,7 +220,11 @@ def main() -> None:
     t0 = time.time()
     sam = sam_model_registry["vit_h"](checkpoint=args.checkpoint)
     sam.to(device=device)
-    mask_generator = SamAutomaticMaskGenerator(sam)
+    mask_generator = SamAutomaticMaskGenerator(
+        sam,
+        pred_iou_thresh=args.pred_iou_thresh,
+        stability_score_thresh=args.stability_score_thresh,
+    )
     print(f"[SEGMENT] SAM loaded in {time.time() - t0:.1f}s")
 
     # Generate masks
@@ -174,9 +233,10 @@ def main() -> None:
     raw_masks = mask_generator.generate(image_rgb)
     print(f"[SEGMENT] Generated {len(raw_masks)} raw masks in {time.time() - t0:.1f}s")
 
-    # Filter
-    filtered = filter_masks(raw_masks, args.min_area_ratio, args.max_area_ratio)
-    print(f"[SEGMENT] Kept {len(filtered)} masks after filtering "
+    # Occupancy-based filtering
+    filtered = filter_masks(raw_masks, args.max_masks, args.min_area_ratio,
+                            args.max_area_ratio, args.min_unique_ratio)
+    print(f"[SEGMENT] Kept {len(filtered)} masks after occupancy filtering "
           f"(removed {len(raw_masks) - len(filtered)})")
 
     if not filtered:
@@ -260,7 +320,8 @@ def main() -> None:
     print(f"\n[SEGMENT] Saved {len(mask_entries)} masks to {output_dir}")
     print(f"[SEGMENT] Manifest: {manifest_path}")
     for m in mask_entries:
-        print(f"  {m['id']}: {m['area_pixels']}px ({m['area_ratio']:.1%})")
+        print(f"  {m['id']}: {m['area_pixels']}px ({m['area_ratio']:.1%}) "
+              f"iou={m['predicted_iou']:.3f}")
 
 
 if __name__ == "__main__":

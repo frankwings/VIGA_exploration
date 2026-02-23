@@ -1,24 +1,29 @@
 """Module 5: 2D3DRegistration (ICP Pose Alignment).
 
 Aligns each TRELLIS mesh to the 2D image using MoGe pointmap and
-layout_post_optimization (ICP + gradient refinement). Produces aligned GLBs
-and per-object pose transforms with IoU scores.
+layout_post_optimization (ICP + gradient refinement). Produces aligned GLBs,
+per-object pose transforms with IoU scores, and a 3D-to-2D projection overlay
+comparing the reconstructed scene against the original image.
 
 This module is an orchestrator that calls pose_align_worker.py in the
-sam3d_py311 conda environment.
+sam3d_py311 conda environment, then renders the scene overlay via Blender.
 
 Usage:
     python modules/registration_2d3d.py \\
         --reconstruct-manifest <output/3d_reconstruction/reconstruction_3d_manifest.json> \\
         --recognize-manifest <output/recognize/recognize_manifest.json> \\
         --monodepth-manifest <output/monodepth/monodepth_manifest.json> \\
-        --output-dir <output/2d3d_registration/>
+        --output-dir <output/2d3d_registration/> \\
+        --blender-command /usr/local/bin/blender
 
 Output:
     registration_2d3d_manifest.json — manifest with per-object aligned poses + IoU
     object_transforms.json          — combined transforms for downstream use
     {name}.glb                      — aligned GLB meshes
-    {name}_info.json                — per-object pose info (translation, rotation, scale, IoU)
+    {name}_info.json                — per-object pose info
+    viz/projection_overlay.png      — 3D render overlaid on original image
+    viz/side_by_side.png            — original vs 3D render comparison
+    viz/scene_render.png            — 3D scene render only (RGBA)
 
 Conda env: agent (orchestrator), spawns sam3d_py311 for alignment
 """
@@ -166,6 +171,94 @@ def build_object_transforms(results: dict, output_dir: str) -> str:
     return path
 
 
+def render_scene_overlay(output_dir: str, scene_image: str,
+                         depth_manifest: dict, blender_cmd: str) -> None:
+    """Render 3D scene with Blender and create overlay comparison.
+
+    Produces:
+      viz/scene_render.png        — 3D render only (RGBA, transparent bg)
+      viz/projection_overlay.png  — 3D render blended on top of original image
+      viz/side_by_side.png        — original | 3D render side by side
+    """
+    from PIL import Image
+
+    viz_dir = os.path.join(output_dir, "viz")
+    os.makedirs(viz_dir, exist_ok=True)
+
+    transforms_path = os.path.join(output_dir, "object_transforms.json")
+    if not os.path.exists(transforms_path):
+        print(f"{TAG} No object_transforms.json, skipping scene render")
+        return
+
+    # Get intrinsics from monodepth manifest (normalized) and convert to pixels
+    intrinsics = depth_manifest.get("intrinsics")
+    pm_shape = depth_manifest.get("pointmap_shape", [0, 0])
+    if not intrinsics or pm_shape == [0, 0]:
+        print(f"{TAG} No intrinsics/pointmap_shape, skipping scene render")
+        return
+
+    pm_h, pm_w = pm_shape
+    fx = intrinsics[0][0] * pm_w
+    fy = intrinsics[1][1] * pm_h
+    cx = intrinsics[0][2] * pm_w
+    cy = intrinsics[1][2] * pm_h
+
+    # Save intrinsics as NPZ for render_full_scene.py
+    moge_npz_path = os.path.join(output_dir, "moge_intrinsics.npz")
+    intrinsics_px = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float64)
+    np.savez(moge_npz_path, intrinsics_px=intrinsics_px,
+             image_width=pm_w, image_height=pm_h)
+
+    render_path = os.path.join(viz_dir, "scene_render.png")
+    render_script = str(ROOT / "render_full_scene.py")
+    log_path = os.path.join(output_dir, "blender_scene.log")
+
+    cmd = [
+        blender_cmd, "-b", "-P", render_script, "--",
+        output_dir, moge_npz_path, render_path,
+    ]
+
+    print(f"{TAG} Rendering 3D scene with Blender...")
+    try:
+        with open(log_path, "w", encoding="utf-8") as lf:
+            subprocess.run(
+                cmd, cwd=str(ROOT), text=True, check=True,
+                stdout=lf, stderr=subprocess.STDOUT,
+            )
+
+        if not os.path.exists(render_path):
+            print(f"{TAG} Blender render produced no output")
+            return
+
+        render_img = Image.open(render_path).convert("RGBA")
+        target_img = Image.open(scene_image).convert("RGB")
+
+        # Match sizes
+        tw, th = target_img.size
+        render_img = render_img.resize((tw, th), Image.LANCZOS)
+
+        # Projection overlay: blend 3D render on top of original
+        target_rgba = target_img.copy().convert("RGBA")
+        # Composite: 3D render (with transparency) on top of original
+        overlay = Image.alpha_composite(target_rgba, render_img)
+        overlay_path = os.path.join(viz_dir, "projection_overlay.png")
+        overlay.convert("RGB").save(overlay_path)
+        print(f"{TAG} Overlay: {overlay_path}")
+
+        # Side-by-side comparison
+        render_rgb = Image.new("RGB", (tw, th), (255, 255, 255))
+        render_rgb.paste(render_img, mask=render_img.split()[3])  # paste using alpha
+        comparison = Image.new("RGB", (tw * 2, th))
+        comparison.paste(target_img, (0, 0))
+        comparison.paste(render_rgb, (tw, 0))
+        sbs_path = os.path.join(viz_dir, "side_by_side.png")
+        comparison.save(sbs_path)
+        print(f"{TAG} Side-by-side: {sbs_path}")
+
+    except Exception as e:
+        print(f"{TAG} Scene render failed: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -179,6 +272,8 @@ def main() -> None:
     parser.add_argument("--monodepth-manifest", required=True,
                         help="Path to monodepth_manifest.json from Module 3")
     parser.add_argument("--output-dir", required=True, help="Output directory")
+    parser.add_argument("--blender-command", default="/usr/local/bin/blender",
+                        help="Path to Blender executable (for scene overlay)")
     args = parser.parse_args()
 
     output_dir = os.path.abspath(args.output_dir)
@@ -218,6 +313,10 @@ def main() -> None:
 
     # Step 2: Build combined transforms
     build_object_transforms(results, output_dir)
+
+    # Step 3: Render 3D-to-2D projection overlay
+    render_scene_overlay(output_dir, scene_image, depth_manifest,
+                         args.blender_command)
 
     # Build final manifest
     obj_entries = []

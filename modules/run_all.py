@@ -82,6 +82,10 @@ def main() -> None:
                         help="TRELLIS version (1 or 2)")
     parser.add_argument("--vlm-model", default="gpt-4o",
                         help="VLM model for object naming")
+    parser.add_argument("--blender-command", default="/usr/local/bin/blender",
+                        help="Path to Blender executable")
+    parser.add_argument("--max-faces", type=int, default=0,
+                        help="Max faces per reconstructed mesh (0 = no limit, e.g. 10000)")
     parser.add_argument("--sam-checkpoint", default=None,
                         help="SAM ViT-H checkpoint path")
     parser.add_argument("--skip-segment", action="store_true",
@@ -119,6 +123,8 @@ def main() -> None:
     print(f"Output:   {output_root}")
     print(f"TRELLIS:  v{args.trellis_version}")
     print(f"VLM:      {args.vlm_model}")
+    print(f"Blender:  {args.blender_command}")
+    print(f"Max faces: {args.max_faces if args.max_faces > 0 else 'unlimited'}")
     print("=" * 60)
 
     total_start = time.time()
@@ -210,15 +216,18 @@ def main() -> None:
         print("\n[4/5] 3D_RECONSTRUCTION")
         t0 = time.time()
         agent_python = get_python_path("agent")
+        recon_args = [
+            "--input-manifest", rec_manifest,
+            "--scene-image", image_path,
+            "--output-dir", dirs["3d_reconstruction"],
+            "--trellis-version", args.trellis_version,
+        ]
+        if args.max_faces > 0:
+            recon_args += ["--max-faces", str(args.max_faces)]
         rc = run_module(
             agent_python,
             os.path.join(modules_dir, "reconstruction_3d.py"),
-            [
-                "--input-manifest", rec_manifest,
-                "--scene-image", image_path,
-                "--output-dir", dirs["3d_reconstruction"],
-                "--trellis-version", args.trellis_version,
-            ],
+            recon_args,
             os.path.join(output_root, "3d_reconstruction.log"),
         )
         timings["3d_reconstruction"] = time.time() - t0
@@ -245,6 +254,7 @@ def main() -> None:
                 "--recognize-manifest", rec_manifest,
                 "--monodepth-manifest", depth_manifest,
                 "--output-dir", dirs["2d3d_registration"],
+                "--blender-command", args.blender_command,
             ],
             os.path.join(output_root, "2d3d_registration.log"),
         )
