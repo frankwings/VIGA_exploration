@@ -1,13 +1,14 @@
 """Render all reconstructed GLBs in a single Blender scene with MoGe camera.
 
 Usage:
-    blender -b -P render_full_scene.py -- <glb_dir> <moge_npz> <output_png> [--flat]
+    blender -b -P render_full_scene.py -- <glb_dir> <moge_npz> <output_png> [--flat] [--vertex-colors]
 
 Where:
     glb_dir:    Directory containing *.glb files and object_transforms.json
     moge_npz:   MoGe intrinsics .npz from the full target image
     output_png: Output render path
     --flat:     Override materials with flat colors (better for silhouette overlay)
+    --vertex-colors: Force vertex color materials on all meshes (for TRELLIS outputs)
 """
 import json
 import math
@@ -33,6 +34,7 @@ def parse_args():
         "moge_npz": os.path.abspath(args[1]),
         "output_png": os.path.abspath(args[2]),
         "flat": "--flat" in args,
+        "vertex_colors": "--vertex-colors" in args,
     }
 
 
@@ -143,6 +145,55 @@ def apply_flat_material(objects, color_idx):
             obj.data.materials.append(mat)
 
 
+def apply_vertex_color_material(objects):
+    """Create a material that reads vertex colors and wire it to all meshes.
+
+    Blender's GLTF importer stores vertex colors as color attributes, but
+    EEVEE won't render them unless a material explicitly reads the attribute.
+    This creates a Principled BSDF with a Color Attribute node connected to
+    Base Color.
+    """
+    for obj in objects:
+        if obj.type != 'MESH':
+            continue
+        mesh = obj.data
+        # Find vertex color attribute name
+        color_attr_name = None
+        if hasattr(mesh, 'color_attributes') and len(mesh.color_attributes) > 0:
+            color_attr_name = mesh.color_attributes[0].name
+        elif hasattr(mesh, 'vertex_colors') and len(mesh.vertex_colors) > 0:
+            color_attr_name = mesh.vertex_colors[0].name
+
+        if not color_attr_name:
+            print(f"  {obj.name}: no vertex colors found")
+            continue
+
+        print(f"  {obj.name}: wiring vertex color attribute '{color_attr_name}'")
+
+        mat = bpy.data.materials.new(name=f"VertexColor_{obj.name}")
+        mat.use_nodes = True
+        tree = mat.node_tree
+        tree.nodes.clear()
+
+        output_node = tree.nodes.new('ShaderNodeOutputMaterial')
+        output_node.location = (300, 0)
+
+        bsdf = tree.nodes.new('ShaderNodeBsdfPrincipled')
+        bsdf.location = (0, 0)
+        bsdf.inputs['Roughness'].default_value = 0.7
+        bsdf.inputs['Specular IOR Level'].default_value = 0.3
+
+        color_node = tree.nodes.new('ShaderNodeVertexColor')
+        color_node.location = (-300, 0)
+        color_node.layer_name = color_attr_name
+
+        tree.links.new(color_node.outputs['Color'], bsdf.inputs['Base Color'])
+        tree.links.new(bsdf.outputs['BSDF'], output_node.inputs['Surface'])
+
+        mesh.materials.clear()
+        mesh.materials.append(mat)
+
+
 def setup_render(width, height):
     scene = bpy.context.scene
     scene.render.engine = 'BLENDER_EEVEE_NEXT'
@@ -208,6 +259,8 @@ def main():
 
     if args["flat"]:
         print("[INFO] Flat-shading mode: overriding materials with distinct colors")
+    elif args["vertex_colors"]:
+        print("[INFO] Vertex-color mode: wiring vertex colors to materials")
 
     color_idx = 0
     # Import all GLBs
@@ -233,6 +286,8 @@ def main():
         if args["flat"]:
             apply_flat_material(imported, color_idx)
             color_idx += 1
+        elif args["vertex_colors"]:
+            apply_vertex_color_material(imported)
 
         # Print bounds for each mesh
         for obj in imported:

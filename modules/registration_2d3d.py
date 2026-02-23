@@ -19,11 +19,14 @@ Usage:
 Output:
     registration_2d3d_manifest.json — manifest with per-object aligned poses + IoU
     object_transforms.json          — combined transforms for downstream use
-    {name}.glb                      — aligned GLB meshes
+    {name}.glb                      — aligned GLB meshes (with vertex colors)
     {name}_info.json                — per-object pose info
-    viz/projection_overlay.png      — 3D render overlaid on original image
-    viz/side_by_side.png            — original vs 3D render comparison
-    viz/scene_render.png            — 3D scene render only (RGBA)
+    viz/scene_render.png            — 3D render with vertex colors (RGBA)
+    viz/projection_overlay.png      — vertex-color 3D render overlaid on original
+    viz/side_by_side.png            — original vs vertex-color 3D render
+    viz/flat_scene_render.png       — flat-shaded 3D render (distinct colors per object)
+    viz/flat_projection_overlay.png — flat-shaded overlay on original
+    viz/flat_side_by_side.png       — original vs flat-shaded 3D render
 
 Conda env: agent (orchestrator), spawns sam3d_py311 for alignment
 """
@@ -175,17 +178,68 @@ def build_object_transforms(results: dict, output_dir: str) -> str:
     return path
 
 
-def render_scene_overlay(output_dir: str, scene_image: str,
-                         depth_manifest: dict, blender_cmd: str) -> None:
-    """Render 3D scene with Blender and create overlay comparison.
+def _run_blender_render(blender_cmd: str, render_script: str,
+                        output_dir: str, moge_npz_path: str,
+                        render_path: str, log_path: str,
+                        extra_flags: list) -> bool:
+    """Run a single Blender render with given flags. Returns True on success."""
+    cmd = [
+        blender_cmd, "-b", "-P", render_script, "--",
+        output_dir, moge_npz_path, render_path,
+    ] + extra_flags
 
-    Produces:
-      viz/scene_render.png        — 3D render only (RGBA, transparent bg)
-      viz/projection_overlay.png  — 3D render blended on top of original image
-      viz/side_by_side.png        — original | 3D render side by side
-    """
+    try:
+        with open(log_path, "w", encoding="utf-8") as lf:
+            subprocess.run(
+                cmd, cwd=str(ROOT), text=True, check=True,
+                stdout=lf, stderr=subprocess.STDOUT,
+            )
+        return os.path.exists(render_path)
+    except Exception as e:
+        print(f"{TAG} Blender render failed: {e}")
+        return False
+
+
+def _make_overlay_images(render_path: str, scene_image: str, viz_dir: str,
+                         prefix: str = "") -> None:
+    """Create overlay and side-by-side images from a render."""
     from PIL import Image
 
+    render_img = Image.open(render_path).convert("RGBA")
+    target_img = Image.open(scene_image).convert("RGB")
+
+    tw, th = target_img.size
+    render_img = render_img.resize((tw, th), Image.LANCZOS)
+
+    # Projection overlay: blend 3D render on top of original
+    target_rgba = target_img.copy().convert("RGBA")
+    overlay = Image.alpha_composite(target_rgba, render_img)
+    overlay_path = os.path.join(viz_dir, f"{prefix}projection_overlay.png")
+    overlay.convert("RGB").save(overlay_path)
+    print(f"{TAG} Overlay: {overlay_path}")
+
+    # Side-by-side comparison
+    render_rgb = Image.new("RGB", (tw, th), (255, 255, 255))
+    render_rgb.paste(render_img, mask=render_img.split()[3])
+    comparison = Image.new("RGB", (tw * 2, th))
+    comparison.paste(target_img, (0, 0))
+    comparison.paste(render_rgb, (tw, 0))
+    sbs_path = os.path.join(viz_dir, f"{prefix}side_by_side.png")
+    comparison.save(sbs_path)
+    print(f"{TAG} Side-by-side: {sbs_path}")
+
+
+def render_scene_overlay(output_dir: str, scene_image: str,
+                         depth_manifest: dict, blender_cmd: str) -> None:
+    """Render 3D scene with Blender and create overlay comparisons.
+
+    Produces two sets of visualizations:
+      1. Vertex-color textured render (actual TRELLIS colors):
+         viz/scene_render.png, viz/projection_overlay.png, viz/side_by_side.png
+      2. Flat-shaded render (distinct colors per object, for alignment eval):
+         viz/flat_scene_render.png, viz/flat_projection_overlay.png,
+         viz/flat_side_by_side.png
+    """
     viz_dir = os.path.join(output_dir, "viz")
     os.makedirs(viz_dir, exist_ok=True)
 
@@ -213,54 +267,29 @@ def render_scene_overlay(output_dir: str, scene_image: str,
     np.savez(moge_npz_path, intrinsics_px=intrinsics_px,
              image_width=pm_w, image_height=pm_h)
 
-    render_path = os.path.join(viz_dir, "scene_render.png")
     render_script = str(ROOT / "render_full_scene.py")
+
+    # Render 1: Vertex-color textured (actual TRELLIS colors)
+    render_path = os.path.join(viz_dir, "scene_render.png")
     log_path = os.path.join(output_dir, "blender_scene.log")
+    print(f"{TAG} Rendering 3D scene with vertex colors...")
+    if _run_blender_render(blender_cmd, render_script, output_dir,
+                           moge_npz_path, render_path, log_path,
+                           ["--vertex-colors"]):
+        _make_overlay_images(render_path, scene_image, viz_dir)
+    else:
+        print(f"{TAG} Textured render failed or produced no output")
 
-    cmd = [
-        blender_cmd, "-b", "-P", render_script, "--",
-        output_dir, moge_npz_path, render_path, "--flat",
-    ]
-
-    print(f"{TAG} Rendering 3D scene with Blender...")
-    try:
-        with open(log_path, "w", encoding="utf-8") as lf:
-            subprocess.run(
-                cmd, cwd=str(ROOT), text=True, check=True,
-                stdout=lf, stderr=subprocess.STDOUT,
-            )
-
-        if not os.path.exists(render_path):
-            print(f"{TAG} Blender render produced no output")
-            return
-
-        render_img = Image.open(render_path).convert("RGBA")
-        target_img = Image.open(scene_image).convert("RGB")
-
-        # Match sizes
-        tw, th = target_img.size
-        render_img = render_img.resize((tw, th), Image.LANCZOS)
-
-        # Projection overlay: blend 3D render on top of original
-        target_rgba = target_img.copy().convert("RGBA")
-        # Composite: 3D render (with transparency) on top of original
-        overlay = Image.alpha_composite(target_rgba, render_img)
-        overlay_path = os.path.join(viz_dir, "projection_overlay.png")
-        overlay.convert("RGB").save(overlay_path)
-        print(f"{TAG} Overlay: {overlay_path}")
-
-        # Side-by-side comparison
-        render_rgb = Image.new("RGB", (tw, th), (255, 255, 255))
-        render_rgb.paste(render_img, mask=render_img.split()[3])  # paste using alpha
-        comparison = Image.new("RGB", (tw * 2, th))
-        comparison.paste(target_img, (0, 0))
-        comparison.paste(render_rgb, (tw, 0))
-        sbs_path = os.path.join(viz_dir, "side_by_side.png")
-        comparison.save(sbs_path)
-        print(f"{TAG} Side-by-side: {sbs_path}")
-
-    except Exception as e:
-        print(f"{TAG} Scene render failed: {e}")
+    # Render 2: Flat-shaded (distinct colors per object)
+    flat_render_path = os.path.join(viz_dir, "flat_scene_render.png")
+    flat_log_path = os.path.join(output_dir, "blender_scene_flat.log")
+    print(f"{TAG} Rendering flat-shaded scene...")
+    if _run_blender_render(blender_cmd, render_script, output_dir,
+                           moge_npz_path, flat_render_path, flat_log_path,
+                           ["--flat"]):
+        _make_overlay_images(flat_render_path, scene_image, viz_dir, prefix="flat_")
+    else:
+        print(f"{TAG} Flat render failed or produced no output")
 
 
 # ---------------------------------------------------------------------------
