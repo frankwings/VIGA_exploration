@@ -27,6 +27,8 @@ Output:
     viz/flat_scene_render.png       — flat-shaded 3D render (distinct colors per object)
     viz/flat_projection_overlay.png — flat-shaded overlay on original
     viz/flat_side_by_side.png       — original vs flat-shaded 3D render
+    viz/rotation_gifs/{name}_y_rotation.gif — per-object Y-axis turntable GIF
+    viz/rotation_gifs/{name}_x_rotation.gif — per-object X-axis tumble GIF
 
 Conda env: agent (orchestrator), spawns sam3d_py311 for alignment
 """
@@ -292,6 +294,69 @@ def render_scene_overlay(output_dir: str, scene_image: str,
         print(f"{TAG} Flat render failed or produced no output")
 
 
+def render_rotation_gifs(results: dict, output_dir: str,
+                         blender_cmd: str, frames: int = 24,
+                         resolution: int = 512) -> None:
+    """Render per-object rotation GIFs (Y turntable + X tumble).
+
+    For each aligned GLB, calls blender_render_rotation.py to render frames,
+    then creates ping-pong GIFs using PIL.
+    """
+    from PIL import Image
+
+    gifs_dir = os.path.join(output_dir, "viz", "rotation_gifs")
+    os.makedirs(gifs_dir, exist_ok=True)
+
+    render_script = str(ROOT / "tools" / "blender_render_rotation.py")
+
+    for name, info in results.items():
+        if info is None:
+            continue
+        glb_path = os.path.join(output_dir, f"{name}.glb")
+        if not os.path.exists(glb_path):
+            print(f"{TAG} No GLB for {name}, skipping rotation render")
+            continue
+
+        frames_dir = os.path.join(gifs_dir, f"{name}_frames")
+        os.makedirs(frames_dir, exist_ok=True)
+
+        cmd = [
+            blender_cmd, "--background", "--python", render_script, "--",
+            glb_path, frames_dir,
+            "--frames", str(frames),
+            "--resolution", str(resolution),
+        ]
+        log_path = os.path.join(gifs_dir, f"{name}_render.log")
+
+        print(f"{TAG} Rendering rotation: {name}...")
+        try:
+            with open(log_path, "w", encoding="utf-8") as lf:
+                subprocess.run(
+                    cmd, cwd=str(ROOT), text=True, check=True,
+                    stdout=lf, stderr=subprocess.STDOUT,
+                )
+        except Exception as e:
+            print(f"{TAG} Rotation render failed for {name}: {e}")
+            continue
+
+        # Create ping-pong GIFs (forward + reverse) for both axes
+        basename = Path(glb_path).stem
+        for axis in ("y", "x"):
+            frame_files = sorted(Path(frames_dir).glob(f"{basename}_{axis}_*.png"))
+            if not frame_files:
+                print(f"{TAG} No {axis}-frames for {name}")
+                continue
+
+            images = [Image.open(f) for f in frame_files]
+            pingpong = images + images[-2:0:-1]
+            gif_path = os.path.join(gifs_dir, f"{name}_{axis}_rotation.gif")
+            pingpong[0].save(
+                gif_path, save_all=True, append_images=pingpong[1:],
+                duration=80, loop=0,
+            )
+            print(f"{TAG} GIF: {gif_path} ({len(pingpong)} frames)")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -354,6 +419,9 @@ def main() -> None:
     # Step 3: Render 3D-to-2D projection overlay
     render_scene_overlay(output_dir, scene_image, depth_manifest,
                          args.blender_command)
+
+    # Step 4: Render per-object rotation GIFs (Y turntable + X tumble)
+    render_rotation_gifs(results, output_dir, args.blender_command)
 
     # Build final manifest
     obj_entries = []

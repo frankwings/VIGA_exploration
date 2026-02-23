@@ -446,10 +446,18 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
         mesh_verts_tensor, pointmap, mask_tensor, device=device
     )
 
-    # Pass original (non-isotropic) intrinsics to layout_post_optimization.
-    # The optimizer's renderer (PerspectiveCameras) supports anisotropic focal
-    # length natively.  Making fx=fy distorts the camera model and degrades
-    # alignment quality.  TRELLIS1's pipeline passes MoGe intrinsics as-is.
+    # Force isotropic intrinsics to match TRELLIS1 pipeline behavior.
+    # InferencePipelinePointMap.run_post_optimization() (line 293-297) does:
+    #   re_focal = min(fx, fy); intrinsics[0,0] = intrinsics[1,1] = re_focal
+    # This is required for correct silhouette rendering in layout_post_optimization.
+    # We keep the original intrinsics for downstream scene rendering.
+    intr_iso = intrinsics.clone()
+    fx_n, fy_n = intr_iso[0, 0].item(), intr_iso[1, 1].item()
+    re_focal = min(fx_n, fy_n)
+    intr_iso[0, 0] = re_focal
+    intr_iso[1, 1] = re_focal
+    print(f"[POSE] {name}: intrinsics fx={fx_n:.4f} fy={fy_n:.4f} → isotropic {re_focal:.4f}",
+          flush=True)
 
     # Pass pointmap directly — layout_post_optimization handles its own resize.
     # Do NOT pad-to-square with NaN then bilinear-resize, as bilinear interpolation
@@ -468,7 +476,7 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
                 scale,                    # (1, 3)
                 mask_tensor,              # (H, W)
                 point_map,                # (H, W, 3)
-                intrinsics,               # (3, 3) — original MoGe intrinsics
+                intr_iso,                 # (3, 3) — isotropic for optimizer
                 min_size=518,
             )
         )
@@ -519,9 +527,9 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
         canonical_glb_path=canonical_glb_path,
     )
 
-    # Build info dict — store the ISOTROPIC intrinsics that the optimizer
-    # Store the same intrinsics that were passed to layout_post_optimization.
-    # Since we now pass original MoGe intrinsics (non-isotropic), store those.
+    # Build info dict — store ORIGINAL (non-isotropic) intrinsics for downstream
+    # scene rendering.  The optimizer received isotropic intrinsics (intr_iso),
+    # but rendering needs the true camera model.
     info = {
         "object_name": name,
         "glb_path": glb_path,
