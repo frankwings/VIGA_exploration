@@ -89,6 +89,9 @@ def run_pose_alignment(scene_image: str, objects: list, output_dir: str) -> dict
         # Pass original textured GLB so alignment preserves textures
         if obj.get("canonical_glb"):
             entry["canonical_glb"] = obj["canonical_glb"]
+        # Pass TRELLIS checkpoint for SS initial pose (if available)
+        if obj.get("checkpoint_path"):
+            entry["checkpoint"] = obj["checkpoint_path"]
         pose_manifest["objects"].append(entry)
 
     manifest_path = os.path.join(output_dir, "pose_manifest.json")

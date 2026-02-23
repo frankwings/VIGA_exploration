@@ -201,6 +201,12 @@ def reconstruct_trellis1(manifest_data: dict, scene_image: str,
                 save_dict = {"vertices": verts, "faces": faces}
                 if vc is not None:
                     save_dict["vertex_colors"] = vc
+                # Preserve TRELLIS SS initial pose for registration module.
+                # The SS stage predicts rotation/translation/scale which are
+                # far better initial guesses than identity rotation.
+                for key in ("rotation", "translation", "scale"):
+                    if key in ckpt:
+                        save_dict[key] = ckpt[key]
                 np.savez(mesh_npz_path, **save_dict)
 
                 canonical_glb = os.path.join(output_dir, f"{name}_canonical.glb")
@@ -208,6 +214,7 @@ def reconstruct_trellis1(manifest_data: dict, scene_image: str,
                     "glb_path": glb_path if os.path.exists(glb_path) else None,
                     "canonical_glb_path": canonical_glb if os.path.exists(canonical_glb) else None,
                     "mesh_path": mesh_npz_path,
+                    "checkpoint_path": ckpt_path,
                     "vertices_count": int(verts.shape[0]),
                     "faces_count": int(faces.shape[0]),
                     "has_colors": vc is not None,
@@ -373,6 +380,8 @@ def main() -> None:
             }
             if r.get("canonical_glb_path"):
                 entry["canonical_glb_path"] = r["canonical_glb_path"]
+            if r.get("checkpoint_path"):
+                entry["checkpoint_path"] = r["checkpoint_path"]
             obj_entries.append(entry)
 
     manifest = {

@@ -11,11 +11,12 @@ Manifest format:
   "objects": [
     {
       "name": "object_name",
-      "mesh": "path/to/canonical_mesh.npz",   // raw vertices+faces in Z-up frame
-      "mask": "path/to/mask.npy",              // SAM binary mask
-      "glb": "path/to/output_aligned.glb",     // output aligned GLB
-      "pbr_glb": "path/to/canonical_pbr.glb",  // optional: PBR GLB to also align
-      "info": "path/to/info.json"              // output pose info
+      "mesh": "path/to/canonical_mesh.npz",        // raw vertices+faces in Z-up frame
+      "mask": "path/to/mask.npy",                   // SAM binary mask
+      "glb": "path/to/output_aligned.glb",          // output aligned GLB
+      "pbr_glb": "path/to/canonical_pbr.glb",       // optional: PBR GLB to also align
+      "info": "path/to/info.json",                  // output pose info
+      "checkpoint": "path/to/checkpoint.npz"        // optional: TRELLIS SS pose data
     },
     ...
   ]
@@ -382,6 +383,24 @@ def transform_and_export_glb(mesh_path, glb_path, quaternion, translation, scale
             print(f"[POSE] WARNING: Failed to align PBR GLB: {e}", flush=True)
 
 
+def _pad_to_square(tensor_3hw, fill_value=0.0):
+    """Pad a (3, H, W) or (H, W) tensor to square, centered."""
+    if tensor_3hw.ndim == 3:
+        _, h, w = tensor_3hw.shape
+    else:
+        h, w = tensor_3hw.shape
+    if h == w:
+        return tensor_3hw
+    diff = abs(h - w)
+    pad1 = diff // 2
+    pad2 = diff - pad1
+    if h > w:
+        padding = (pad1, pad2, 0, 0)  # left, right, top, bottom
+    else:
+        padding = (0, 0, pad1, pad2)
+    return F.pad(tensor_3hw, padding, mode="constant", value=fill_value)
+
+
 def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
     """Process one object: load mesh, run layout_post_optimization, export."""
     from sam3d_objects.pipeline.inference_utils import layout_post_optimization
@@ -430,9 +449,9 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
 
     # Get pointmap and intrinsics
     pointmap = pointmap_data["pointmap"]  # (3, H, W)
-    intrinsics = pointmap_data["intrinsics"]  # (3, 3)
+    intrinsics = pointmap_data["intrinsics"].clone()  # (3, 3)
 
-    # Resize mask and pointmap to same size
+    # Resize mask to match pointmap
     pm_h, pm_w = pointmap.shape[1], pointmap.shape[2]
     if mask_tensor.shape[0] != pm_h or mask_tensor.shape[1] != pm_w:
         mask_tensor = F.interpolate(
@@ -440,28 +459,63 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
             size=(pm_h, pm_w), mode="nearest"
         ).squeeze()
 
-    # Compute initial pose
-    mesh_verts_tensor = torch.tensor(vertices, dtype=torch.float32, device=device)
-    quaternion, translation, scale = create_initial_pose(
-        mesh_verts_tensor, pointmap, mask_tensor, device=device
-    )
+    # --- Initial pose: use TRELLIS SS checkpoint if available -----------
+    # The checkpoint (saved by sam3d_batch_worker) contains the TRELLIS
+    # Sparse Structure model's predicted rotation/translation/scale.
+    # These are far better initial poses than identity rotation.
+    checkpoint_path = obj.get("checkpoint")
+    ss_pose_loaded = False
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        ckpt = np.load(checkpoint_path)
+        if "rotation" in ckpt and "translation" in ckpt and "scale" in ckpt:
+            quaternion = torch.tensor(ckpt["rotation"], dtype=torch.float32, device=device)
+            if quaternion.dim() == 1:
+                quaternion = quaternion.unsqueeze(0)
+            translation = torch.tensor(ckpt["translation"], dtype=torch.float32, device=device)
+            if translation.dim() == 1:
+                translation = translation.unsqueeze(0)
+            scale = torch.tensor(ckpt["scale"], dtype=torch.float32, device=device)
+            if scale.dim() == 1:
+                scale = scale.unsqueeze(0)
+            ss_pose_loaded = True
+            rot = quaternion.squeeze().tolist()
+            print(f"[POSE] {name}: loaded TRELLIS SS pose "
+                  f"(rot=[{rot[0]:.3f},{rot[1]:.3f},{rot[2]:.3f},{rot[3]:.3f}], "
+                  f"scale={scale.squeeze()[0].item():.4f})", flush=True)
 
-    # Pass original MoGe intrinsics (non-isotropic in normalized space).
-    # MoGe's fx_norm and fy_norm are designed so that fx_norm*W ≈ fy_norm*H
-    # (isotropic in pixel space).  The TRELLIS1 pipeline forces isotropic
-    # normalized intrinsics, but that's only correct when the mask is
-    # padded to square first.  Since we pass the original non-square mask,
-    # the original normalized intrinsics give correct pixel focal lengths.
-    print(f"[POSE] {name}: intrinsics fx={intrinsics[0,0].item():.4f} "
-          f"fy={intrinsics[1,1].item():.4f}", flush=True)
+    if not ss_pose_loaded:
+        # Fall back to geometry-based initial pose (identity rotation)
+        mesh_verts_tensor = torch.tensor(vertices, dtype=torch.float32, device=device)
+        quaternion, translation, scale = create_initial_pose(
+            mesh_verts_tensor, pointmap, mask_tensor, device=device
+        )
 
-    # Pass pointmap directly — layout_post_optimization handles its own resize.
-    # Do NOT pad-to-square with NaN then bilinear-resize, as bilinear interpolation
-    # with NaN neighbors spreads NaN to all surrounding pixels.
-    point_map = pointmap.float().permute(1, 2, 0)  # (3, H, W) → (H, W, 3)
+    # --- Match old pipeline preprocessing: square pad + isotropic K ----
+    # The TRELLIS1 pipeline pads pointmap+mask to square and forces
+    # isotropic normalized intrinsics fx=fy=min(fx,fy).  This ensures
+    # the silhouette renderer inside layout_post_optimization matches
+    # the spatial layout of the 518×518 preprocessor output.
+    # Without this, the optimizer runs on a non-square image with
+    # different camera geometry, causing suboptimal convergence.
+    fx, fy = intrinsics[0, 0].item(), intrinsics[1, 1].item()
+    re_focal = min(fx, fy)
+    intrinsics[0, 0] = re_focal
+    intrinsics[1, 1] = re_focal
+
+    # Pad pointmap to square (NaN fill for invalid regions)
+    pointmap_sq = _pad_to_square(pointmap.float(), fill_value=float('nan'))
+    # Pad mask to square (zero fill — no object in padded region)
+    mask_sq = _pad_to_square(mask_tensor, fill_value=0.0)
+
+    print(f"[POSE] {name}: intrinsics fx=fy={re_focal:.4f} (isotropic), "
+          f"pointmap {pm_h}x{pm_w} -> {pointmap_sq.shape[1]}x{pointmap_sq.shape[2]} (square)",
+          flush=True)
+
+    point_map = pointmap_sq.permute(1, 2, 0)  # (3, S, S) → (S, S, 3)
 
     # Run layout_post_optimization
-    print(f"[POSE] {name}: running layout_post_optimization...", flush=True)
+    print(f"[POSE] {name}: running layout_post_optimization "
+          f"(SS_pose={ss_pose_loaded})...", flush=True)
     t_opt = time.time()
     try:
         revised_quat, revised_t, revised_scale, final_iou, flag_icp, flag_optim = (
@@ -470,9 +524,9 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
                 quaternion.unsqueeze(1),  # (1, 1, 4)
                 translation,              # (1, 3)
                 scale,                    # (1, 3)
-                mask_tensor,              # (H, W)
-                point_map,                # (H, W, 3)
-                intrinsics,               # (3, 3) — original MoGe intrinsics
+                mask_sq,                  # (S, S) — square padded
+                point_map,                # (S, S, 3) — square padded
+                intrinsics,               # (3, 3) — isotropic
                 min_size=518,
             )
         )
@@ -524,6 +578,9 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
     )
 
     # Build info dict — store original MoGe intrinsics for downstream rendering.
+    # Use original (non-isotropic) intrinsics for rendering, not the isotropic
+    # ones used by the optimizer.  The renderer works on non-square images.
+    orig_intrinsics = pointmap_data["intrinsics"]
     info = {
         "object_name": name,
         "glb_path": glb_path,
@@ -531,7 +588,8 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
         "rotation": R_final.squeeze().tolist(),
         "scale": S_final.squeeze().tolist(),
         "iou": float(final_iou),
-        "intrinsics": intrinsics.cpu().tolist() if hasattr(intrinsics, 'cpu') else intrinsics,
+        "ss_pose_used": ss_pose_loaded,
+        "intrinsics": orig_intrinsics.cpu().tolist() if hasattr(orig_intrinsics, 'cpu') else orig_intrinsics,
         "pointmap_shape": [pm_h, pm_w],
     }
 
