@@ -40,9 +40,9 @@ sys.path.append(os.path.join(ROOT, "utils", "third_party", "sam"))
 # ---------------------------------------------------------------------------
 
 def filter_masks(raw_masks: List[Dict[str, Any]],
-                 max_masks: int = 15,
+                 max_masks: int = 20,
                  min_area_ratio: float = 0.01,
-                 max_area_ratio: float = 0.50,
+                 max_area_ratio: float = 0.95,
                  min_unique_ratio: float = 0.70) -> List[Dict[str, Any]]:
     """Occupancy-based mask selection (matches original SAM3D pipeline).
 
@@ -175,12 +175,12 @@ def main() -> None:
     parser.add_argument("--stability-score-thresh", type=float, default=0.95,
                         help="SAM stability score threshold (default 0.95)")
     # Post-generation filtering
-    parser.add_argument("--max-masks", type=int, default=15,
-                        help="Max masks to keep after filtering (default 15)")
+    parser.add_argument("--max-masks", type=int, default=20,
+                        help="Max masks to keep after filtering (default 20)")
     parser.add_argument("--min-area-ratio", type=float, default=0.01,
                         help="Min mask area as fraction of image (default 1%%)")
-    parser.add_argument("--max-area-ratio", type=float, default=0.50,
-                        help="Max mask area as fraction of image (default 50%%)")
+    parser.add_argument("--max-area-ratio", type=float, default=0.95,
+                        help="Max mask area as fraction of image (default 95%%)")
     parser.add_argument("--min-unique-ratio", type=float, default=0.70,
                         help="Min unique pixel ratio for occupancy filter (default 70%%)")
     args = parser.parse_args()
