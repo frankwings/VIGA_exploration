@@ -170,8 +170,14 @@ def main():
     setup_camera_opencv(fx, fy, cx, cy, img_w, img_h)
 
     # Import all GLBs
-    for t in transforms:
-        obj_name = t.get("object_name", os.path.basename(t["glb_path"]).replace(".glb", ""))
+    # Support both list format [{glb_path:...}] and dict format {name: {glb_path:...}}
+    if isinstance(transforms, dict):
+        items = [(k, v) for k, v in transforms.items()
+                 if isinstance(v, dict) and "glb_path" in v]
+    else:
+        items = [(t.get("object_name", str(i)), t) for i, t in enumerate(transforms)]
+
+    for obj_name, t in items:
         glb_path = t["glb_path"]
         if not os.path.isabs(glb_path):
             glb_path = os.path.join(args["glb_dir"], os.path.basename(glb_path))
