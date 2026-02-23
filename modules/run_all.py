@@ -1,20 +1,20 @@
 """Orchestrator: Run all 5 modules in sequence.
 
 Runs the full pipeline from a single image:
-  1. Segment  — SAM mask generation
-  2. Recognize — VLM object naming
-  3. MonoDepth — MoGe depth estimation
-  4. Reconstruct — TRELLIS 3D reconstruction
-  5. Register — 2D-3D pose alignment
+  1. Segment            — SAM mask generation
+  2. Recognize          — VLM object naming
+  3. MonoDepth          — MoGe depth estimation
+  4. 3DReconstruction   — TRELLIS 3D mesh generation
+  5. 2D3DRegistration   — ICP pose alignment
 
 Each module runs in its own conda environment via subprocess. Manifests
 (JSON files) are passed between modules to maintain independence.
 
 Usage:
-    python modules/run_all.py \
-        --image <target.jpg> \
-        --output-dir <output/pipeline_run/> \
-        --trellis-version 1 \
+    python modules/run_all.py \\
+        --image <target.jpg> \\
+        --output-dir <output/pipeline_run/> \\
+        --trellis-version 1 \\
         --vlm-model gpt-4o
 
 Conda env: agent (Python 3.10, orchestrator only)
@@ -82,8 +82,6 @@ def main() -> None:
                         help="TRELLIS version (1 or 2)")
     parser.add_argument("--vlm-model", default="gpt-4o",
                         help="VLM model for object naming")
-    parser.add_argument("--blender-command", default="/usr/local/bin/blender",
-                        help="Path to Blender executable")
     parser.add_argument("--sam-checkpoint", default=None,
                         help="SAM ViT-H checkpoint path")
     parser.add_argument("--skip-segment", action="store_true",
@@ -92,10 +90,10 @@ def main() -> None:
                         help="Skip recognition (reuse existing)")
     parser.add_argument("--skip-monodepth", action="store_true",
                         help="Skip mono depth (reuse existing)")
-    parser.add_argument("--skip-reconstruct", action="store_true",
-                        help="Skip reconstruction (reuse existing)")
-    parser.add_argument("--skip-register", action="store_true",
-                        help="Skip registration (reuse existing)")
+    parser.add_argument("--skip-3d-reconstruction", action="store_true",
+                        help="Skip 3D reconstruction (reuse existing)")
+    parser.add_argument("--skip-2d3d-registration", action="store_true",
+                        help="Skip 2D-3D registration (reuse existing)")
     args = parser.parse_args()
 
     image_path = os.path.abspath(args.image)
@@ -106,8 +104,8 @@ def main() -> None:
         "segment": os.path.join(output_root, "segment"),
         "recognize": os.path.join(output_root, "recognize"),
         "monodepth": os.path.join(output_root, "monodepth"),
-        "reconstruct": os.path.join(output_root, "reconstruct"),
-        "register": os.path.join(output_root, "register"),
+        "3d_reconstruction": os.path.join(output_root, "3d_reconstruction"),
+        "2d3d_registration": os.path.join(output_root, "2d3d_registration"),
     }
     for d in dirs.values():
         os.makedirs(d, exist_ok=True)
@@ -121,7 +119,6 @@ def main() -> None:
     print(f"Output:   {output_root}")
     print(f"TRELLIS:  v{args.trellis_version}")
     print(f"VLM:      {args.vlm_model}")
-    print(f"Blender:  {args.blender_command}")
     print("=" * 60)
 
     total_start = time.time()
@@ -206,59 +203,58 @@ def main() -> None:
         print("\n[3/5] MONODEPTH (skipped)")
 
     # -----------------------------------------------------------------------
-    # Module 4: Reconstruct
+    # Module 4: 3DReconstruction
     # -----------------------------------------------------------------------
-    recon_manifest = os.path.join(dirs["reconstruct"], "reconstruct_manifest.json")
-    if not args.skip_reconstruct:
-        print("\n[4/5] RECONSTRUCT")
+    recon_manifest = os.path.join(dirs["3d_reconstruction"], "reconstruction_3d_manifest.json")
+    if not args.skip_3d_reconstruction:
+        print("\n[4/5] 3D_RECONSTRUCTION")
         t0 = time.time()
         agent_python = get_python_path("agent")
         rc = run_module(
             agent_python,
-            os.path.join(modules_dir, "reconstruct.py"),
+            os.path.join(modules_dir, "reconstruction_3d.py"),
             [
                 "--input-manifest", rec_manifest,
                 "--scene-image", image_path,
-                "--output-dir", dirs["reconstruct"],
+                "--output-dir", dirs["3d_reconstruction"],
                 "--trellis-version", args.trellis_version,
             ],
-            os.path.join(output_root, "reconstruct.log"),
+            os.path.join(output_root, "3d_reconstruction.log"),
         )
-        timings["reconstruct"] = time.time() - t0
+        timings["3d_reconstruction"] = time.time() - t0
         if rc != 0:
-            print(f"[4/5] RECONSTRUCT FAILED (exit {rc})")
+            print(f"[4/5] 3D_RECONSTRUCTION FAILED (exit {rc})")
             sys.exit(1)
-        print(f"[4/5] RECONSTRUCT done ({timings['reconstruct']:.1f}s)")
+        print(f"[4/5] 3D_RECONSTRUCTION done ({timings['3d_reconstruction']:.1f}s)")
     else:
-        print("\n[4/5] RECONSTRUCT (skipped)")
+        print("\n[4/5] 3D_RECONSTRUCTION (skipped)")
 
     # -----------------------------------------------------------------------
-    # Module 5: Register
+    # Module 5: 2D3DRegistration
     # -----------------------------------------------------------------------
-    reg_manifest = os.path.join(dirs["register"], "register_manifest.json")
-    if not args.skip_register:
-        print("\n[5/5] REGISTER")
+    reg_manifest = os.path.join(dirs["2d3d_registration"], "registration_2d3d_manifest.json")
+    if not args.skip_2d3d_registration:
+        print("\n[5/5] 2D3D_REGISTRATION")
         t0 = time.time()
         agent_python = get_python_path("agent")
         rc = run_module(
             agent_python,
-            os.path.join(modules_dir, "register.py"),
+            os.path.join(modules_dir, "registration_2d3d.py"),
             [
                 "--reconstruct-manifest", recon_manifest,
                 "--recognize-manifest", rec_manifest,
                 "--monodepth-manifest", depth_manifest,
-                "--output-dir", dirs["register"],
-                "--blender-command", args.blender_command,
+                "--output-dir", dirs["2d3d_registration"],
             ],
-            os.path.join(output_root, "register.log"),
+            os.path.join(output_root, "2d3d_registration.log"),
         )
-        timings["register"] = time.time() - t0
+        timings["2d3d_registration"] = time.time() - t0
         if rc != 0:
-            print(f"[5/5] REGISTER FAILED (exit {rc})")
+            print(f"[5/5] 2D3D_REGISTRATION FAILED (exit {rc})")
             sys.exit(1)
-        print(f"[5/5] REGISTER done ({timings['register']:.1f}s)")
+        print(f"[5/5] 2D3D_REGISTRATION done ({timings['2d3d_registration']:.1f}s)")
     else:
-        print("\n[5/5] REGISTER (skipped)")
+        print("\n[5/5] 2D3D_REGISTRATION (skipped)")
 
     # -----------------------------------------------------------------------
     # Summary
@@ -269,8 +265,8 @@ def main() -> None:
     print("PIPELINE COMPLETE")
     print(f"{'='*60}")
     for module, t in timings.items():
-        print(f"  {module:15s} {t:7.1f}s ({t/60:.1f} min)")
-    print(f"  {'TOTAL':15s} {total_time:7.1f}s ({total_time/60:.1f} min)")
+        print(f"  {module:20s} {t:7.1f}s ({t/60:.1f} min)")
+    print(f"  {'TOTAL':20s} {total_time:7.1f}s ({total_time/60:.1f} min)")
     print(f"\nOutput: {output_root}")
 
     # Save pipeline summary
@@ -285,8 +281,8 @@ def main() -> None:
             "segment": seg_manifest,
             "recognize": rec_manifest,
             "monodepth": depth_manifest,
-            "reconstruct": recon_manifest,
-            "register": reg_manifest,
+            "3d_reconstruction": recon_manifest,
+            "2d3d_registration": reg_manifest,
         },
     }
     summary_path = os.path.join(output_root, "pipeline_summary.json")
