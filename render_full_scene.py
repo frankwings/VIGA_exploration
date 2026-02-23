@@ -1,12 +1,13 @@
 """Render all reconstructed GLBs in a single Blender scene with MoGe camera.
 
 Usage:
-    blender -b -P render_full_scene.py -- <glb_dir> <moge_npz> <output_png>
+    blender -b -P render_full_scene.py -- <glb_dir> <moge_npz> <output_png> [--flat]
 
 Where:
     glb_dir:    Directory containing *.glb files and object_transforms.json
     moge_npz:   MoGe intrinsics .npz from the full target image
     output_png: Output render path
+    --flat:     Override materials with flat colors (better for silhouette overlay)
 """
 import json
 import math
@@ -21,7 +22,7 @@ from mathutils import Euler, Vector
 def parse_args():
     argv = sys.argv
     if "--" not in argv:
-        print("[ERROR] Usage: blender -b -P render_full_scene.py -- <glb_dir> <moge_npz> <output_png>")
+        print("[ERROR] Usage: blender -b -P render_full_scene.py -- <glb_dir> <moge_npz> <output_png> [--flat]")
         sys.exit(1)
     args = argv[argv.index("--") + 1:]
     if len(args) < 3:
@@ -31,6 +32,7 @@ def parse_args():
         "glb_dir": os.path.abspath(args[0]),
         "moge_npz": os.path.abspath(args[1]),
         "output_png": os.path.abspath(args[2]),
+        "flat": "--flat" in args,
     }
 
 
@@ -98,12 +100,47 @@ def setup_lighting():
     area.data.size = 3.0
 
 
+# Distinct colors for flat-shaded objects (pastel palette for visibility)
+FLAT_COLORS = [
+    (0.85, 0.45, 0.45, 0.85),  # red
+    (0.45, 0.70, 0.85, 0.85),  # blue
+    (0.50, 0.80, 0.50, 0.85),  # green
+    (0.85, 0.75, 0.40, 0.85),  # yellow
+    (0.75, 0.55, 0.85, 0.85),  # purple
+    (0.85, 0.60, 0.35, 0.85),  # orange
+    (0.40, 0.80, 0.75, 0.85),  # teal
+    (0.80, 0.50, 0.65, 0.85),  # pink
+    (0.65, 0.75, 0.45, 0.85),  # lime
+    (0.55, 0.60, 0.80, 0.85),  # slate
+]
+
+
 def import_glb(glb_path):
     before = set(bpy.data.objects)
     bpy.ops.import_scene.gltf(filepath=glb_path)
     after = set(bpy.data.objects)
     imported = list(after - before)
     return imported
+
+
+def apply_flat_material(objects, color_idx):
+    """Replace all materials on objects with a flat-colored semi-transparent material."""
+    color = FLAT_COLORS[color_idx % len(FLAT_COLORS)]
+    mat = bpy.data.materials.new(name=f"Flat_{color_idx}")
+    mat.use_nodes = True
+    mat.blend_method = 'BLEND' if hasattr(mat, 'blend_method') else 'OPAQUE'
+    tree = mat.node_tree
+    tree.nodes.clear()
+    output = tree.nodes.new('ShaderNodeOutputMaterial')
+    bsdf = tree.nodes.new('ShaderNodeBsdfPrincipled')
+    bsdf.inputs['Base Color'].default_value = color
+    bsdf.inputs['Alpha'].default_value = color[3]
+    bsdf.inputs['Roughness'].default_value = 0.8
+    tree.links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
+    for obj in objects:
+        if obj.type == 'MESH':
+            obj.data.materials.clear()
+            obj.data.materials.append(mat)
 
 
 def setup_render(width, height):
@@ -169,6 +206,10 @@ def main():
     setup_lighting()
     setup_camera_opencv(fx, fy, cx, cy, img_w, img_h)
 
+    if args["flat"]:
+        print("[INFO] Flat-shading mode: overriding materials with distinct colors")
+
+    color_idx = 0
     # Import all GLBs
     # Support both list format [{glb_path:...}] and dict format {name: {glb_path:...}}
     if isinstance(transforms, dict):
@@ -188,6 +229,10 @@ def main():
 
         imported = import_glb(glb_path)
         print(f"[INFO] Imported {obj_name}: {len(imported)} objects")
+
+        if args["flat"]:
+            apply_flat_material(imported, color_idx)
+            color_idx += 1
 
         # Print bounds for each mesh
         for obj in imported:

@@ -219,7 +219,7 @@ def render_scene_overlay(output_dir: str, scene_image: str,
 
     cmd = [
         blender_cmd, "-b", "-P", render_script, "--",
-        output_dir, moge_npz_path, render_path,
+        output_dir, moge_npz_path, render_path, "--flat",
     ]
 
     print(f"{TAG} Rendering 3D scene with Blender...")
