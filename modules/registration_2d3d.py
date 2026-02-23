@@ -422,6 +422,9 @@ def main() -> None:
         # Pass canonical (pre-transform, Z-up) GLB for texture-preserving alignment
         if recon_obj.get("canonical_glb_path"):
             obj_entry["canonical_glb"] = recon_obj["canonical_glb_path"]
+        # Pass TRELLIS checkpoint for SS initial pose
+        if recon_obj.get("checkpoint_path"):
+            obj_entry["checkpoint_path"] = recon_obj["checkpoint_path"]
         objects.append(obj_entry)
 
     print(f"{TAG} Scene image: {scene_image}")
