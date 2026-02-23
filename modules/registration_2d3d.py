@@ -152,11 +152,20 @@ def run_pose_alignment(scene_image: str, objects: list, output_dir: str) -> dict
     return results
 
 
-def build_object_transforms(results: dict, output_dir: str) -> str:
-    """Build combined object_transforms.json from per-object info JSONs."""
+def build_object_transforms(results: dict, output_dir: str,
+                             min_iou: float = 0.15) -> str:
+    """Build combined object_transforms.json from per-object info JSONs.
+
+    Objects with IoU below min_iou are excluded from the scene render
+    to prevent badly-aligned large meshes from blocking the camera view.
+    """
     transforms = {}
     for name, info in results.items():
         if info is None:
+            continue
+        iou = info.get("iou", -1)
+        if 0 <= iou < min_iou:
+            print(f"{TAG} Excluding {name} from scene render (IoU={iou:.4f} < {min_iou})")
             continue
         transforms[name] = {
             "glb_path": os.path.join(output_dir, f"{name}.glb"),
