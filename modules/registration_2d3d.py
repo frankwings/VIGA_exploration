@@ -167,7 +167,7 @@ def build_object_transforms(results: dict, output_dir: str,
         if info is None:
             continue
         iou = info.get("iou", -1)
-        if 0 <= iou < min_iou:
+        if iou < min_iou:
             print(f"{TAG} Excluding {name} from scene render (IoU={iou:.4f} < {min_iou})")
             continue
         transforms[name] = {

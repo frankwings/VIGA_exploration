@@ -1,13 +1,14 @@
 """Module 2: Object Recognition (VLM naming).
 
 Reads masked PNG images from Module 1 (Segment) and uses a VLM to assign
-descriptive names to each object. Filters out masks identified as background.
+descriptive names to each object. All masks are kept, including those
+identified as background.
 
 Usage:
     python modules/recognize.py \
         --input-manifest <output/segment/segment_manifest.json> \
         --output-dir <output/recognize/> \
-        --model gpt-4o
+        --model gemini-2.0-flash
 
 Output:
     recognize_manifest.json       — manifest listing named objects
@@ -15,7 +16,7 @@ Output:
     {name}.png                    — renamed masked RGBA images
     viz/named_objects_grid.png    — grid with object name labels
 
-Conda env: agent (Python 3.10, OpenAI client)
+Conda env: agent (Python 3.10, OpenAI-compatible client)
 """
 
 import argparse
@@ -52,7 +53,7 @@ def sanitize_filename(name: str) -> str:
 def get_object_name_from_vlm(
     image_path: str,
     ori_img_path: str,
-    model: str = "gpt-4o",
+    model: str = "gemini-2.0-flash",
     existing_names: Optional[List[str]] = None,
 ) -> str:
     """Use a VLM to identify the object in an image and return a unique name."""
@@ -86,8 +87,9 @@ def get_object_name_from_vlm(
                             "descriptive name for it (e.g., 'red_chair', 'wooden_table'). "
                             "If the first image is not clear, check the second image to "
                             "get the whole context.\n\n"
-                            "If you think the first image is not an object, but a "
-                            "background, please return 'background' as the object name.\n\n"
+                            "If the mask covers background elements (walls, floor, ceiling), "
+                            "still describe what you see (e.g., 'floor_area', 'wall_section', "
+                            "'ceiling_light'). Always provide a descriptive name.\n\n"
                             "Use only lowercase letters, numbers, and underscores. The "
                             "name should be a single word or short phrase (2-3 words max, "
                             f"use underscores to separate words).{existing_str}\n\n"
@@ -153,7 +155,7 @@ def main() -> None:
     parser.add_argument("--input-manifest", required=True,
                         help="Path to segment_manifest.json from Module 1")
     parser.add_argument("--output-dir", required=True, help="Output directory")
-    parser.add_argument("--model", default="gpt-4o", help="VLM model for naming")
+    parser.add_argument("--model", default="gemini-2.0-flash", help="VLM model for naming")
     args = parser.parse_args()
 
     output_dir = os.path.abspath(args.output_dir)
@@ -196,10 +198,6 @@ def main() -> None:
             png_path, image_path, model=args.model, existing_names=object_names
         )
 
-        if name == "background":
-            print(f"  {mask_id} -> background (skipped)")
-            continue
-
         object_names.append(name)
         print(f"  {mask_id} -> {name}")
 
@@ -236,8 +234,7 @@ def main() -> None:
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
 
-    print(f"\n[RECOGNIZE] Identified {len(objects)} objects "
-          f"({len(masks) - len(objects)} rejected as background)")
+    print(f"\n[RECOGNIZE] Identified {len(objects)} objects (all masks kept)")
     print(f"[RECOGNIZE] Manifest: {manifest_path}")
     for obj in objects:
         print(f"  {obj['mask_id']} -> {obj['name']}")
