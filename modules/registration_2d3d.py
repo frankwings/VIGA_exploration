@@ -251,10 +251,9 @@ def render_scene_overlay(output_dir: str, scene_image: str,
         return
 
     # Get intrinsics from monodepth manifest (normalized) and convert to pixels.
-    # IMPORTANT: Use isotropic focal length (min(fx,fy)) to match what
-    # layout_post_optimization uses internally.  TRELLIS1's
-    # run_post_optimization() forces fx=fy=min(fx,fy) before optimizing,
-    # so the rendering camera must use the same focal length model.
+    # MoGe's normalized intrinsics (fx_norm, fy_norm) convert to pixel space as:
+    #   fx_px = fx_norm * width, fy_px = fy_norm * height
+    # For a single physical focal length, fx_norm*W ≈ fy_norm*H (isotropic in pixels).
     intrinsics = depth_manifest.get("intrinsics")
     pm_shape = depth_manifest.get("pointmap_shape", [0, 0])
     if not intrinsics or pm_shape == [0, 0]:
@@ -262,15 +261,12 @@ def render_scene_overlay(output_dir: str, scene_image: str,
         return
 
     pm_h, pm_w = pm_shape
-    fx_norm = intrinsics[0][0]
-    fy_norm = intrinsics[1][1]
-    re_focal = min(fx_norm, fy_norm)
-    fx = re_focal * pm_w
-    fy = re_focal * pm_h
+    fx = intrinsics[0][0] * pm_w
+    fy = intrinsics[1][1] * pm_h
     cx = intrinsics[0][2] * pm_w
     cy = intrinsics[1][2] * pm_h
-    print(f"{TAG} Render intrinsics: fx_norm={fx_norm:.4f} fy_norm={fy_norm:.4f} "
-          f"→ isotropic {re_focal:.4f} → fx_px={fx:.1f} fy_px={fy:.1f}")
+    print(f"{TAG} Render intrinsics: fx_px={fx:.1f} fy_px={fy:.1f} "
+          f"cx={cx:.1f} cy={cy:.1f} ({pm_w}x{pm_h})")
 
     # Save intrinsics as NPZ for render_full_scene.py
     moge_npz_path = os.path.join(output_dir, "moge_intrinsics.npz")

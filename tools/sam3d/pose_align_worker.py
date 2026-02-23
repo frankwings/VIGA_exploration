@@ -446,18 +446,14 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
         mesh_verts_tensor, pointmap, mask_tensor, device=device
     )
 
-    # Force isotropic intrinsics to match TRELLIS1 pipeline behavior.
-    # InferencePipelinePointMap.run_post_optimization() (line 293-297) does:
-    #   re_focal = min(fx, fy); intrinsics[0,0] = intrinsics[1,1] = re_focal
-    # This is required for correct silhouette rendering in layout_post_optimization.
-    # We keep the original intrinsics for downstream scene rendering.
-    intr_iso = intrinsics.clone()
-    fx_n, fy_n = intr_iso[0, 0].item(), intr_iso[1, 1].item()
-    re_focal = min(fx_n, fy_n)
-    intr_iso[0, 0] = re_focal
-    intr_iso[1, 1] = re_focal
-    print(f"[POSE] {name}: intrinsics fx={fx_n:.4f} fy={fy_n:.4f} → isotropic {re_focal:.4f}",
-          flush=True)
+    # Pass original MoGe intrinsics (non-isotropic in normalized space).
+    # MoGe's fx_norm and fy_norm are designed so that fx_norm*W ≈ fy_norm*H
+    # (isotropic in pixel space).  The TRELLIS1 pipeline forces isotropic
+    # normalized intrinsics, but that's only correct when the mask is
+    # padded to square first.  Since we pass the original non-square mask,
+    # the original normalized intrinsics give correct pixel focal lengths.
+    print(f"[POSE] {name}: intrinsics fx={intrinsics[0,0].item():.4f} "
+          f"fy={intrinsics[1,1].item():.4f}", flush=True)
 
     # Pass pointmap directly — layout_post_optimization handles its own resize.
     # Do NOT pad-to-square with NaN then bilinear-resize, as bilinear interpolation
@@ -476,7 +472,7 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
                 scale,                    # (1, 3)
                 mask_tensor,              # (H, W)
                 point_map,                # (H, W, 3)
-                intr_iso,                 # (3, 3) — isotropic for optimizer
+                intrinsics,               # (3, 3) — original MoGe intrinsics
                 min_size=518,
             )
         )
@@ -527,9 +523,7 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
         canonical_glb_path=canonical_glb_path,
     )
 
-    # Build info dict — store ORIGINAL (non-isotropic) intrinsics for downstream
-    # scene rendering.  The optimizer received isotropic intrinsics (intr_iso),
-    # but rendering needs the true camera model.
+    # Build info dict — store original MoGe intrinsics for downstream rendering.
     info = {
         "object_name": name,
         "glb_path": glb_path,
