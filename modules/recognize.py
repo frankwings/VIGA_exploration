@@ -26,6 +26,7 @@ import os
 import re
 import shutil
 import sys
+import time
 from typing import List, Optional
 
 import numpy as np
@@ -79,8 +80,9 @@ def _get_name_gemini(
     model: str,
     existing_names: List[str],
     api_key: str,
+    max_retries: int = 3,
 ) -> str:
-    """Call Gemini via google-genai SDK."""
+    """Call Gemini via google-genai SDK with retry on rate limits."""
     from google import genai
 
     client = genai.Client(api_key=api_key)
@@ -88,11 +90,20 @@ def _get_name_gemini(
     ori_img = Image.open(ori_img_path).convert("RGB")
     prompt = _build_prompt(existing_names)
 
-    resp = client.models.generate_content(
-        model=model,
-        contents=[mask_img, ori_img, prompt],
-    )
-    return resp.text.strip()
+    for attempt in range(max_retries + 1):
+        try:
+            resp = client.models.generate_content(
+                model=model,
+                contents=[mask_img, ori_img, prompt],
+            )
+            return resp.text.strip()
+        except Exception as e:
+            if "429" in str(e) and attempt < max_retries:
+                wait = 15 * (attempt + 1)
+                print(f"[RECOGNIZE]   Rate limited, waiting {wait}s (attempt {attempt+1}/{max_retries})...")
+                time.sleep(wait)
+            else:
+                raise
 
 
 def _get_name_openai(
