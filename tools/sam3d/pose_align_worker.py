@@ -401,6 +401,56 @@ def _pad_to_square(tensor_3hw, fill_value=0.0):
     return F.pad(tensor_3hw, padding, mode="constant", value=fill_value)
 
 
+def _multi_start_rotation(mesh, translation, scale, mask_sq, point_map,
+                          intrinsics, layout_post_opt_fn, device):
+    """Try multiple initial rotations, return the quaternion with best IoU.
+
+    For TRELLIS2 objects that lack SS pose predictions, the identity rotation
+    often leads to local minima in ICP. By trying 4 Y-axis rotations
+    (0/90/180/270 deg) we cover the main horizontal orientations and let
+    ICP pick the best starting point.
+
+    Only runs steps 1+2 (manual alignment + ICP) per hypothesis — skips the
+    expensive Adam render-compare stage. The full optimization runs once
+    afterward with the winning rotation.
+    """
+    import math
+    import copy
+
+    angles_y = [0, math.pi / 2, math.pi, 3 * math.pi / 2]
+    best_iou = -2.0
+    best_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=device)
+
+    for angle in angles_y:
+        w = math.cos(angle / 2)
+        y = math.sin(angle / 2)
+        quat = torch.tensor([[w, 0.0, y, 0.0]], device=device)  # (1, 4) wxyz
+
+        try:
+            _, _, _, iou, _, _ = layout_post_opt_fn(
+                copy.deepcopy(mesh),
+                quat.unsqueeze(1),       # (1, 1, 4)
+                translation.clone(),     # (1, 3)
+                scale.clone(),           # (1, 3)
+                mask_sq.clone(),
+                point_map.clone(),
+                intrinsics.clone(),
+                Enable_rendering_optimization=False,  # steps 1+2 only
+                min_size=518,
+            )
+        except Exception:
+            iou = -1.0
+
+        angle_deg = int(round(angle * 180 / math.pi))
+        print(f"  [multi-start] Y={angle_deg:3d}°: IoU={iou:.4f}", flush=True)
+
+        if iou > best_iou:
+            best_iou = iou
+            best_quat = quat
+
+    return best_quat, best_iou
+
+
 def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
     """Process one object: load mesh, run layout_post_optimization, export."""
     from sam3d_objects.pipeline.inference_utils import layout_post_optimization
@@ -459,6 +509,28 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
             size=(pm_h, pm_w), mode="nearest"
         ).squeeze()
 
+    # --- Preprocessing: square pad + isotropic K -------------------------
+    # The TRELLIS1 pipeline pads pointmap+mask to square and forces
+    # isotropic normalized intrinsics fx=fy=min(fx,fy).  This ensures
+    # the silhouette renderer inside layout_post_optimization matches
+    # the spatial layout of the 518×518 preprocessor output.
+    # Done BEFORE pose selection so multi-start can use these.
+    fx, fy = intrinsics[0, 0].item(), intrinsics[1, 1].item()
+    re_focal = min(fx, fy)
+    intrinsics[0, 0] = re_focal
+    intrinsics[1, 1] = re_focal
+
+    # Pad pointmap to square (NaN fill for invalid regions)
+    pointmap_sq = _pad_to_square(pointmap.float(), fill_value=float('nan'))
+    # Pad mask to square (zero fill — no object in padded region)
+    mask_sq = _pad_to_square(mask_tensor, fill_value=0.0)
+
+    print(f"[POSE] {name}: intrinsics fx=fy={re_focal:.4f} (isotropic), "
+          f"pointmap {pm_h}x{pm_w} -> {pointmap_sq.shape[1]}x{pointmap_sq.shape[2]} (square)",
+          flush=True)
+
+    point_map = pointmap_sq.permute(1, 2, 0)  # (3, S, S) → (S, S, 3)
+
     # --- Initial pose: use TRELLIS SS checkpoint if available -----------
     # The checkpoint (saved by sam3d_batch_worker) contains the TRELLIS
     # Sparse Structure model's predicted rotation/translation/scale.
@@ -484,34 +556,18 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
                   f"scale={scale.squeeze()[0].item():.4f})", flush=True)
 
     if not ss_pose_loaded:
-        # Fall back to geometry-based initial pose (identity rotation)
+        # No SS pose (TRELLIS2 or missing checkpoint). Use MoGe-based
+        # translation/scale, then multi-start rotation to find best initial
+        # rotation via ICP probing (4 Y-axis hypotheses).
         mesh_verts_tensor = torch.tensor(vertices, dtype=torch.float32, device=device)
-        quaternion, translation, scale = create_initial_pose(
+        _, translation, scale = create_initial_pose(
             mesh_verts_tensor, pointmap, mask_tensor, device=device
         )
-
-    # --- Match old pipeline preprocessing: square pad + isotropic K ----
-    # The TRELLIS1 pipeline pads pointmap+mask to square and forces
-    # isotropic normalized intrinsics fx=fy=min(fx,fy).  This ensures
-    # the silhouette renderer inside layout_post_optimization matches
-    # the spatial layout of the 518×518 preprocessor output.
-    # Without this, the optimizer runs on a non-square image with
-    # different camera geometry, causing suboptimal convergence.
-    fx, fy = intrinsics[0, 0].item(), intrinsics[1, 1].item()
-    re_focal = min(fx, fy)
-    intrinsics[0, 0] = re_focal
-    intrinsics[1, 1] = re_focal
-
-    # Pad pointmap to square (NaN fill for invalid regions)
-    pointmap_sq = _pad_to_square(pointmap.float(), fill_value=float('nan'))
-    # Pad mask to square (zero fill — no object in padded region)
-    mask_sq = _pad_to_square(mask_tensor, fill_value=0.0)
-
-    print(f"[POSE] {name}: intrinsics fx=fy={re_focal:.4f} (isotropic), "
-          f"pointmap {pm_h}x{pm_w} -> {pointmap_sq.shape[1]}x{pointmap_sq.shape[2]} (square)",
-          flush=True)
-
-    point_map = pointmap_sq.permute(1, 2, 0)  # (3, S, S) → (S, S, 3)
+        quaternion, probe_iou = _multi_start_rotation(
+            mesh, translation, scale, mask_sq, point_map, intrinsics,
+            layout_post_optimization, device,
+        )
+        print(f"[POSE] {name}: multi-start best probe IoU={probe_iou:.4f}", flush=True)
 
     # Run layout_post_optimization
     print(f"[POSE] {name}: running layout_post_optimization "
