@@ -526,8 +526,8 @@ def make_pipeline_table_slide(prs, date_str, title):
             x += col_width
 
 
-def make_architecture_table_slide(prs, date_str, title):
-    """SAM3D vs TRELLIS v1 vs TRELLIS.2: fancy comparison table."""
+def make_pipeline_flowchart_slide(prs, date_str, title):
+    """SAM3D Pipeline: visual flowchart with boxes and arrows."""
     s = prs.slides.add_slide(prs.slide_layouts[6])
     set_slide_bg(s, BG_DARK)
 
@@ -535,32 +535,98 @@ def make_architecture_table_slide(prs, date_str, title):
     add_text(s, Inches(0.2), Inches(0.1), Inches(12.9), Inches(0.5),
              f"{date_str}  —  {title}", 24, ACCENT_BLUE, True)
 
-    # Table data
-    rows = [
-        ("Aspect", "SAM3D (TRELLIS v1)", "TRELLIS.2"),
-        ("Backbone", "TRELLIS v1 backbone", "O-Voxel octree"),
-        ("Model Size", "~500M params", "~4B params"),
-        ("Resolution", "SLAT dense 64³", "Up to 1536³"),
-        ("Architecture", "SS + SLAT + decoder", "3-stage DiT"),
-        ("Pose Estimation", "SS model (end-to-end)", "None built-in"),
-        ("VRAM Required", "3-4 GB (7 models)", "9-10 GB"),
-        ("Speed (per object)", "60-90s (L4 GPU)", "~180s (L4 GPU)"),
-        ("Mesh Quality", "80K verts, vertex colors", "500K-2.4M verts, PBR"),
-        ("Module 4b Result", "Baseline IoU 0.53", "SS transfer: IoU 0.157 (no gain)"),
+    # Flowchart boxes and arrows
+    box_width = Inches(1.8)
+    box_height = Inches(0.7)
+    start_x = Inches(0.5)
+    start_y = Inches(1.2)
+    spacing_x = Inches(2.1)
+
+    steps = [
+        ("Step 1\nSAM", "Binary\nMasks", ACCENT_PURPLE),
+        ("Step 2\nMoGe", "Pointmap +\nIntrinsics", ACCENT_BLUE),
+        ("Step 3\nTRELLIS", "3D\nMesh", ACCENT_GREEN),
+        ("Step 4\nSS Model", "Pose\n(S,R,T)", ACCENT_ORANGE),
+        ("Step 5\nOptim.", "Refined\nPose", ACCENT_PURPLE),
+        ("Step 6\nExport", "Final\nGLB", ACCENT_GREEN),
     ]
 
-    # Dimensions
-    left = Inches(0.2)
+    # Draw boxes and labels
+    for idx, (step_name, output_name, color) in enumerate(steps):
+        x = start_x + idx * spacing_x
+        y = start_y
+
+        # Box
+        box = add_rect(s, x, y, box_width, box_height, BG_CARD)
+
+        # Step name (top)
+        add_text(s, x, y + Inches(0.05), box_width, Inches(0.35),
+                step_name, 11, color, True, PP_ALIGN.CENTER)
+
+        # Output name (bottom)
+        add_text(s, x, y + Inches(0.38), box_width, Inches(0.27),
+                output_name, 9, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
+
+        # Arrow to next box
+        if idx < len(steps) - 1:
+            arrow_x = x + box_width + Inches(0.05)
+            arrow_y = y + box_height / 2
+            line = s.shapes.add_connector(1,
+                                        x + box_width, arrow_y,
+                                        x + box_width + Inches(0.2), arrow_y)
+            line.line.color.rgb = TEXT_SECONDARY
+            line.line.width = Pt(1.5)
+
+    # Add legend/description at bottom
+    add_text(s, Inches(0.5), Inches(2.2), Inches(12), Inches(4.5),
+            "Pipeline Flow:\n\n"
+            "• Step 1: Segment scene into per-object masks using SAM ViT-H\n"
+            "• Step 2: Estimate 3D geometry (pointmap) from full scene using MoGe\n"
+            "• Step 3: Generate 3D mesh per object using TRELLIS (SS + SLAT + decoder)\n"
+            "• Step 4: Predict object pose (scale, rotation, translation) from SS model\n"
+            "• Step 5: Refine pose via ICP and silhouette rendering optimization\n"
+            "• Step 6: Export final GLB with baked transforms in PyTorch3D camera space\n\n"
+            "Key Insight: TRELLIS receives ONLY RGBA image (not depth). MoGe depth used for pose only.",
+            12, TEXT_SECONDARY, False, PP_ALIGN.LEFT)
+
+
+def make_architecture_table_slide(prs, date_str, title):
+    """TRELLIS v1 vs SAM3D vs TRELLIS.2: fancy comparison table."""
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(s, BG_DARK)
+
+    # Title
+    add_text(s, Inches(0.2), Inches(0.1), Inches(12.9), Inches(0.5),
+             f"{date_str}  —  {title}", 24, ACCENT_BLUE, True)
+
+    # Table data with 4 columns
+    rows = [
+        ("Aspect", "TRELLIS v1 (Base)", "SAM3D (T1 + Meta)", "TRELLIS.2"),
+        ("Backbone", "SLAT dense flow", "TRELLIS v1 backbone", "O-Voxel octree"),
+        ("Model Size", "~500M params", "~500M (T1) + heads", "~4B params"),
+        ("Resolution", "SLAT 64³ dense", "SLAT 64³ dense", "Up to 1536³ octree"),
+        ("Architecture", "SS + SLAT + decoder", "SS + SLAT + MoT poses", "3-stage DiT"),
+        ("Pose Estimation", "Layout optimizer only", "SS model (end-to-end)", "None built-in"),
+        ("Pose Prior", "No SS model", "MoT heads added", "No equivalent"),
+        ("VRAM Required", "~3 GB", "~3-4 GB (7 models)", "~9-10 GB"),
+        ("Speed (per object)", "~60-90s (L4)", "~60-90s (L4)", "~180s (L4)"),
+        ("Mesh Quality", "80K verts, vert colors", "80K verts, vert colors", "500K-2.4M verts, PBR"),
+        ("Intended Use", "Baseline 3D recon", "Scene understanding", "High-quality meshes"),
+        ("IoU (Dining)", "N/A (baseline)", "0.53 (reference)", "0.23 (w/o SS)"),
+    ]
+
+    # Dimensions for 4-column table
+    left = Inches(0.15)
     top = Inches(0.75)
-    col_widths = [Inches(3.0), Inches(4.5), Inches(4.6)]
-    row_height = Inches(0.52)
+    col_widths = [Inches(2.2), Inches(3.0), Inches(3.5), Inches(3.8)]
+    row_height = Inches(0.42)
 
     # Draw table
     for row_idx, row in enumerate(rows):
         is_header = (row_idx == 0)
         bg_color = BG_CARD if is_header else BG_DARK
         text_color = ACCENT_GREEN if is_header else TEXT_SECONDARY
-        text_size = 11 if is_header else 9
+        text_size = 10 if is_header else 8.5
 
         x = left
         for col_idx, (col_width, cell_text) in enumerate(zip(col_widths, row)):
@@ -576,8 +642,8 @@ def make_architecture_table_slide(prs, date_str, title):
                 line.line.width = Pt(0.5)
 
             # Cell text
-            add_text(s, x + Inches(0.05), top + row_idx * row_height + Inches(0.05),
-                    col_width - Inches(0.1), row_height - Inches(0.05),
+            add_text(s, x + Inches(0.04), top + row_idx * row_height + Inches(0.03),
+                    col_width - Inches(0.08), row_height - Inches(0.06),
                     cell_text, text_size, text_color, is_header, PP_ALIGN.LEFT)
             x += col_width
 
@@ -605,11 +671,12 @@ def process_entry(prs, date_str, author, entry):
 
     # Special handling for table entries
     if source_md == "20260216_SAM3D_Pipeline.md":
-        # SAM3D Pipeline deep dive with table
+        # SAM3D Pipeline deep dive with table and flowchart
         make_text_page(prs, date_str, author, "Analysis", ACCENT_PURPLE,
                        entry["title"], entry["summary"], entry.get("key_points", []))
         first_slide = prs.slides[len(prs.slides) - 1]
         make_pipeline_table_slide(prs, date_str, "SAM3D Pipeline: 6-Step Breakdown")
+        make_pipeline_flowchart_slide(prs, date_str, "SAM3D Pipeline: Visual Flow")
     elif source_md == "20260224_SAM3D_TRELLIS_Architecture_Comparison.md":
         # Architecture comparison with table
         make_text_page(prs, date_str, author, "Analysis", ACCENT_PURPLE,
