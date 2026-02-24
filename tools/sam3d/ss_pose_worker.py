@@ -60,11 +60,24 @@ def make_masked_rgba(scene_rgb, mask_npy_path):
 
     The SS model needs to see which object to predict pose for via the alpha mask.
     The full scene RGB provides context for depth estimation.
+    If the scene image and mask have different resolutions, the scene is resized
+    to match the mask (the SS model pads to square and resizes to 518x518 anyway).
     """
     mask = np.load(mask_npy_path)
     if mask.ndim == 3:
         mask = mask[..., 0]
     mask_uint8 = (mask > 0).astype(np.uint8) * 255
+
+    # Resize scene to match mask dimensions if needed
+    h_mask, w_mask = mask_uint8.shape
+    h_scene, w_scene = scene_rgb.shape[:2]
+    if h_scene != h_mask or w_scene != w_mask:
+        from PIL import Image as _PILImage
+        scene_rgb = np.array(
+            _PILImage.fromarray(scene_rgb).resize((w_mask, h_mask), _PILImage.LANCZOS)
+        )
+        print(f"[SS_POSE] Resized scene {w_scene}x{h_scene} → {w_mask}x{h_mask} to match mask",
+              flush=True)
 
     rgba = np.zeros((scene_rgb.shape[0], scene_rgb.shape[1], 4), dtype=np.uint8)
     rgba[..., :3] = scene_rgb
