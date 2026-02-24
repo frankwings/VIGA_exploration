@@ -13,7 +13,7 @@ from PIL import Image
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.enum.shapes import MSO_SHAPE
 
 DOCS = Path("docs")
@@ -54,9 +54,10 @@ def set_slide_bg(slide, color):
 
 
 def add_text(slide, left, top, width, height, text, size=18,
-             color=TEXT_PRIMARY, bold=False, align=PP_ALIGN.LEFT):
+             color=TEXT_PRIMARY, bold=False, align=PP_ALIGN.LEFT, vertical_anchor=MSO_ANCHOR.MIDDLE):
     tb = slide.shapes.add_textbox(left, top, width, height)
     tb.text_frame.word_wrap = True
+    tb.text_frame.vertical_anchor = vertical_anchor
     p = tb.text_frame.paragraphs[0]
     p.text = text
     p.font.size = Pt(size)
@@ -519,10 +520,10 @@ def make_pipeline_table_slide(prs, date_str, title):
                 line.line.color.rgb = TEXT_SECONDARY
                 line.line.width = Pt(0.5)
 
-            # Cell text with more padding for larger fonts
-            add_text(s, x + Inches(0.05), top + row_idx * row_height + Inches(0.08),
-                    col_width - Inches(0.1), row_height - Inches(0.15),
-                    cell_text, text_size, text_color, is_header, PP_ALIGN.LEFT)
+            # Cell text centered both horizontally and vertically
+            add_text(s, x + Inches(0.05), top + row_idx * row_height,
+                    col_width - Inches(0.1), row_height,
+                    cell_text, text_size, text_color, is_header, PP_ALIGN.CENTER)
             x += col_width
 
 
@@ -673,10 +674,10 @@ def make_architecture_table_slide(prs, date_str, title):
                 line.line.color.rgb = TEXT_SECONDARY
                 line.line.width = Pt(0.5)
 
-            # Cell text with more padding for larger fonts
-            add_text(s, x + Inches(0.05), top + row_idx * row_height + Inches(0.08),
-                    col_width - Inches(0.1), row_height - Inches(0.15),
-                    cell_text, text_size, text_color, is_header, PP_ALIGN.LEFT)
+            # Cell text centered both horizontally and vertically
+            add_text(s, x + Inches(0.05), top + row_idx * row_height,
+                    col_width - Inches(0.1), row_height,
+                    cell_text, text_size, text_color, is_header, PP_ALIGN.CENTER)
             x += col_width
 
 
