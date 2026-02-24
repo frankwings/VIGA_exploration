@@ -1,11 +1,15 @@
-"""Orchestrator: Run all 5 modules in sequence.
+"""Orchestrator: Run all modules in sequence.
 
 Runs the full pipeline from a single image:
-  1. Segment            — SAM mask generation
-  2. Recognize          — VLM object naming
-  3. MonoDepth          — MoGe depth estimation
-  4. 3DReconstruction   — TRELLIS 3D mesh generation
-  5. 2D3DRegistration   — ICP pose alignment
+  1.  Segment            — SAM mask generation
+  2.  Recognize          — VLM object naming
+  3.  MonoDepth          — MoGe depth estimation
+  4a. 3DReconstruction   — TRELLIS 3D mesh generation
+  4b. SS Pose (TRELLIS2) — Meta's SS model predicts initial rotation/translation/scale
+  5.  2D3DRegistration   — ICP pose alignment
+
+Module 4b only runs for TRELLIS2 objects (which lack built-in pose prediction).
+TRELLIS1 objects already have SS pose from the integrated SAM3D pipeline.
 
 Each module runs in its own conda environment via subprocess. Manifests
 (JSON files) are passed between modules to maintain independence.
@@ -74,6 +78,35 @@ def run_module(python_path: str, module_path: str, args: list,
     return result.returncode
 
 
+def _merge_ss_pose(recon_manifest_path: str, ss_pose_manifest_path: str,
+                    output_root: str) -> str:
+    """Merge SS pose checkpoint paths into the reconstruction manifest.
+
+    Returns the path to the merged manifest. Module 5 reads this to get
+    checkpoint_path for each object (used as initial pose in ICP).
+    """
+    with open(recon_manifest_path, "r", encoding="utf-8") as f:
+        recon = json.load(f)
+    with open(ss_pose_manifest_path, "r", encoding="utf-8") as f:
+        ss_pose = json.load(f)
+
+    checkpoint_map = ss_pose.get("objects", {})
+    merged_count = 0
+    for obj in recon["objects"]:
+        name = obj["name"]
+        if name in checkpoint_map:
+            obj["checkpoint_path"] = checkpoint_map[name]
+            merged_count += 1
+            print(f"  Merged SS pose for {name}")
+
+    merged_path = os.path.join(output_root, "reconstruction_3d_with_ss_pose.json")
+    with open(merged_path, "w", encoding="utf-8") as f:
+        json.dump(recon, f, indent=2)
+
+    print(f"  Merged {merged_count} SS pose checkpoints → {merged_path}")
+    return merged_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run full modular pipeline")
     parser.add_argument("--image", required=True, help="Path to input scene image")
@@ -96,6 +129,8 @@ def main() -> None:
                         help="Skip mono depth (reuse existing)")
     parser.add_argument("--skip-3d-reconstruction", action="store_true",
                         help="Skip 3D reconstruction (reuse existing)")
+    parser.add_argument("--skip-ss-pose", action="store_true",
+                        help="Skip SS pose estimation (reuse existing)")
     parser.add_argument("--skip-2d3d-registration", action="store_true",
                         help="Skip 2D-3D registration (reuse existing)")
     args = parser.parse_args()
@@ -109,6 +144,7 @@ def main() -> None:
         "recognize": os.path.join(output_root, "recognize"),
         "monodepth": os.path.join(output_root, "monodepth"),
         "3d_reconstruction": os.path.join(output_root, "3d_reconstruction"),
+        "ss_pose": os.path.join(output_root, "ss_pose"),
         "2d3d_registration": os.path.join(output_root, "2d3d_registration"),
     }
     for d in dirs.values():
@@ -239,6 +275,52 @@ def main() -> None:
         print("\n[4/5] 3D_RECONSTRUCTION (skipped)")
 
     # -----------------------------------------------------------------------
+    # Module 4b: SS Pose Estimation (TRELLIS2 only)
+    # -----------------------------------------------------------------------
+    # For TRELLIS2, objects lack built-in pose prediction. Module 4b uses
+    # Meta's SS model to predict initial rotation/translation/scale.
+    # For TRELLIS1, the SS pose is already captured in sam3d_batch_worker.
+    ss_pose_manifest = os.path.join(dirs["ss_pose"], "ss_pose_manifest.json")
+    recon_manifest_for_reg = recon_manifest  # default: pass reconstruction manifest as-is
+
+    if args.trellis_version == "2" and not args.skip_ss_pose:
+        print("\n[4b] SS_POSE (TRELLIS2)")
+        t0 = time.time()
+        agent_python = get_python_path("agent")
+        rc = run_module(
+            agent_python,
+            os.path.join(modules_dir, "ss_pose.py"),
+            [
+                "--reconstruct-manifest", recon_manifest,
+                "--recognize-manifest", rec_manifest,
+                "--monodepth-manifest", depth_manifest,
+                "--scene-image", image_path,
+                "--output-dir", dirs["ss_pose"],
+            ],
+            os.path.join(output_root, "ss_pose.log"),
+        )
+        timings["ss_pose"] = time.time() - t0
+        if rc != 0:
+            print(f"[4b] SS_POSE FAILED (exit {rc})")
+            # Non-fatal: registration will fall back to multi-start rotation
+            print("[4b] Continuing with heuristic pose fallback...")
+        else:
+            print(f"[4b] SS_POSE done ({timings['ss_pose']:.1f}s)")
+            # Merge SS pose checkpoints into reconstruction manifest for Module 5
+            recon_manifest_for_reg = _merge_ss_pose(
+                recon_manifest, ss_pose_manifest, output_root
+            )
+    elif args.trellis_version == "2":
+        print("\n[4b] SS_POSE (skipped)")
+        # Check if a previous run already merged the manifest
+        merged_path = os.path.join(output_root, "reconstruction_3d_with_ss_pose.json")
+        if os.path.exists(merged_path):
+            recon_manifest_for_reg = merged_path
+    else:
+        # TRELLIS1: SS pose already in reconstruction checkpoint — no 4b needed
+        pass
+
+    # -----------------------------------------------------------------------
     # Module 5: 2D3DRegistration
     # -----------------------------------------------------------------------
     reg_manifest = os.path.join(dirs["2d3d_registration"], "registration_2d3d_manifest.json")
@@ -250,7 +332,7 @@ def main() -> None:
             agent_python,
             os.path.join(modules_dir, "registration_2d3d.py"),
             [
-                "--reconstruct-manifest", recon_manifest,
+                "--reconstruct-manifest", recon_manifest_for_reg,
                 "--recognize-manifest", rec_manifest,
                 "--monodepth-manifest", depth_manifest,
                 "--output-dir", dirs["2d3d_registration"],
@@ -292,6 +374,7 @@ def main() -> None:
             "recognize": rec_manifest,
             "monodepth": depth_manifest,
             "3d_reconstruction": recon_manifest,
+            "ss_pose": ss_pose_manifest if args.trellis_version == "2" else None,
             "2d3d_registration": reg_manifest,
         },
     }
