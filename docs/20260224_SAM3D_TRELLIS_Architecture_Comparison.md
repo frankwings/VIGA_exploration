@@ -1,14 +1,104 @@
 # Architecture Comparison: SAM3D Objects vs TRELLIS v1 vs TRELLIS.2
 
 **Date**: 2026-02-24
-**Updated**: 2026-02-24 (corrected with verified sources)
+**Updated**: 2026-02-24 (corrected with verified sources and code-lineage evidence)
 
 ## Sources
 
-- **TRELLIS v1** (Microsoft): [github.com/microsoft/TRELLIS](https://github.com/microsoft/TRELLIS)
+- **TRELLIS v1** (Microsoft): [github.com/microsoft/TRELLIS](https://github.com/microsoft/TRELLIS) — MIT License, CVPR'25 Spotlight
 - **TRELLIS.2** (Microsoft): [github.com/microsoft/TRELLIS.2](https://github.com/microsoft/TRELLIS.2), [project page](https://microsoft.github.io/TRELLIS.2/)
-- **SAM3D Objects** (Meta): `utils/third_party/sam3d/` in this repo (Meta's fork of TRELLIS v1)
+- **SAM3D Objects** (Meta): [github.com/facebookresearch/sam-3d-objects](https://github.com/facebookresearch/sam-3d-objects) — SAM License (Nov 2025), paper [arXiv 2511.16624](https://arxiv.org/abs/2511.16624)
+- **SAM3D Objects in this repo**: `utils/third_party/sam3d/` (submodule from `github.com/frankwings/GenesisSam.git`, a fork of the Meta repo)
 - **Timing data**: Measured on GCP VM `genesisforge-gpu` (g2-standard-8, NVIDIA L4 24GB)
+
+---
+
+## Relationship Between SAM3D Objects and TRELLIS v1
+
+**SAM3D's paper cites TRELLIS only as a comparison baseline**, not as code it builds on.
+All source files carry `# Copyright (c) Meta Platforms, Inc. and affiliates.` with no
+Microsoft attribution. The SAM License (Nov 2025) is Meta's own, not TRELLIS's MIT license.
+
+However, there is **strong code-level evidence** that SAM3D's 3D backbone is derived from
+TRELLIS v1's codebase (which is MIT-licensed, permitting this). The evidence:
+
+### Identical class names and file names
+
+| File | TRELLIS v1 ([microsoft/TRELLIS](https://github.com/microsoft/TRELLIS/tree/main/trellis/models)) | SAM3D (`sam3d_objects/model/backbone/tdfy_dit/models/`) |
+|---|---|---|
+| `sparse_structure_flow.py` | `class SparseStructureFlowModel` | `class SparseStructureFlowModel` (identical) |
+| `structured_latent_flow.py` | `class SLatFlowModel` | `class SLatFlowModel` (identical) |
+| `sparse_structure_vae.py` | `class SparseStructureDecoder` | `class SparseStructureDecoder` (identical) |
+| `decoder_gs.py` | `class SLatGaussianDecoder` | `class SLatGaussianDecoder` (identical) |
+| `decoder_mesh.py` | `class SLatMeshDecoder` | `class SLatMeshDecoder` (identical) |
+
+### Identical imports
+
+TRELLIS v1 `sparse_structure_flow.py`:
+
+```python
+from ..modules.utils import convert_module_to_f16, convert_module_to_f32
+from ..modules.transformer import AbsolutePositionEmbedder, ModulatedTransformerCrossBlock
+from ..modules.spatial import patchify, unpatchify
+```
+
+SAM3D `sparse_structure_flow.py` (line 7-14):
+
+```python
+from ..modules.utils import convert_module_to_f16, convert_module_to_f32
+from ..modules.transformer import (
+    AbsolutePositionEmbedder,
+    ModulatedTransformerCrossBlock,
+)
+from ..modules.spatial import patchify, unpatchify
+```
+
+### Identical `__init__` parameter signatures
+
+TRELLIS v1 `SparseStructureFlowModel.__init__`:
+
+```python
+resolution, in_channels, model_channels, cond_channels, out_channels,
+num_blocks, num_heads, num_head_channels, mlp_ratio, patch_size,
+pe_mode ("ape"/"rope"), use_fp16, use_checkpoint, share_mod, qk_rms_norm
+```
+
+SAM3D `SparseStructureFlowModel.__init__` (line 72):
+
+```python
+resolution, in_channels, model_channels, cond_channels, out_channels,
+num_blocks, num_heads, num_head_channels, mlp_ratio, patch_size,
+pe_mode ("ape"/"rope"), use_fp16, use_checkpoint, share_mod, qk_rms_norm
+```
+
+### SAM3D also ships the unmodified TRELLIS v1 version
+
+SAM3D contains **both** files:
+
+- `sparse_structure_flow.py` — the original (TRELLIS v1-identical) version
+- `mot_sparse_structure_flow.py` — Meta's MoT-upgraded version with pose heads
+
+The non-MoT file has no Meta-specific additions and matches TRELLIS v1's implementation.
+
+### What Meta added on top
+
+1. **MoT (Mixture-of-Transformers)** — `MOTModulatedTransformerCrossBlock` with multi-latent
+   heads for joint shape + pose prediction (`mot_sparse_structure_flow.py`)
+2. **Pointmap conditioning** — `PointPatchEmbed` in `pointmap.py` for MoGe depth input
+3. **Pose decoder** — `pose_decoder()` in `inference_utils.py` (pure function, no weights)
+4. **Layout post-optimization** — ICP-based render-and-compare alignment
+5. **Progressive training** — multi-stage training for scene reconstruction
+
+### Conclusion
+
+SAM3D's 3D reconstruction backbone almost certainly derives from TRELLIS v1's MIT-licensed
+code. Meta retrained the models with their additions (MoT, pointmap, pose) and released
+under their own SAM License. This is legal under MIT. The SAM3D paper cites TRELLIS as
+`\citep{xiang2025structured}` but only in the context of a comparison baseline, not as
+architectural lineage.
+
+**In this document we describe SAM3D's backbone using TRELLIS v1 as the reference
+implementation, since the model architecture code is shared.**
 
 ---
 
@@ -63,7 +153,7 @@ just a deterministic decoder. ~10MB.
 
 | | **SAM3D Objects** (Meta) | **TRELLIS v1** (Microsoft) | **TRELLIS.2** (Microsoft) |
 |---|---|---|---|
-| **Source** | Meta fork of TRELLIS v1 | [microsoft/TRELLIS](https://github.com/microsoft/TRELLIS) | [microsoft/TRELLIS.2](https://github.com/microsoft/TRELLIS.2) |
+| **Source** | [facebookresearch/sam-3d-objects](https://github.com/facebookresearch/sam-3d-objects) (backbone derived from TRELLIS v1, see [evidence above](#relationship-between-sam3d-objects-and-trellis-v1)) | [microsoft/TRELLIS](https://github.com/microsoft/TRELLIS) | [microsoft/TRELLIS.2](https://github.com/microsoft/TRELLIS.2) |
 | **Total params** | ~1.8B | ~1.2B (large) | ~4.7B |
 | **Stages** | 2 (SS + SLAT) | 2 (SS + SLAT) | 3 (SS + Geometry + Material) |
 | **Pose prediction** | Yes (built-in via MoT) | No | No |
@@ -77,13 +167,14 @@ just a deterministic decoder. ~10MB.
 
 ## Detailed Pipeline: SAM3D Objects / TRELLIS v1
 
-Both share the same core codebase. SAM3D **is** Meta's fork of TRELLIS v1 with three
-additions: (1) MoT for pose prediction, (2) pointmap conditioning via MoGe,
+SAM3D's 3D backbone shares architecture code with TRELLIS v1 (see
+[evidence above](#relationship-between-sam3d-objects-and-trellis-v1)). Meta added:
+(1) MoT for pose prediction, (2) pointmap conditioning via MoGe,
 (3) progressive training for scene reconstruction.
 
 The TRELLIS v1 model definitions live at
 [github.com/microsoft/TRELLIS/tree/main/trellis/models](https://github.com/microsoft/TRELLIS/tree/main/trellis/models).
-Meta's modified copies are in `sam3d_objects/model/backbone/tdfy_dit/models/` in this repo.
+SAM3D's copies (with Meta additions) are in `sam3d_objects/model/backbone/tdfy_dit/models/`.
 
 ### Input
 
