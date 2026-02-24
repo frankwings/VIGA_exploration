@@ -465,13 +465,15 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
     faces = data["faces"]
     print(f"[POSE] {name}: mesh {vertices.shape[0]} verts, {faces.shape[0]} faces", flush=True)
 
-    # Pre-decimate dense TRELLIS2 meshes before layout_post_optimization.
-    # TRELLIS2 raw meshes have 500K–2.3M vertices (voxel decoder output),
-    # while TRELLIS1 produces 3K–17K.  The optimizer's internal simplification
-    # (simplify_quadric_decimation to 5000 triangles) struggles with extreme
-    # 400:1 reductions, producing distorted meshes and poor alignment.
-    # Pre-decimating to ~20K faces gives the optimizer a clean, manageable mesh.
-    MAX_FACES_FOR_ALIGNMENT = 20000
+    # Pre-decimate meshes to match layout_post_optimization's internal target
+    # (5000 triangles in load_and_simplify_mesh).  This is critical for
+    # TRELLIS2 meshes: their Flexicubes output has 30K verts / 10K faces.
+    # Open3D's simplify_quadric_decimation removes faces but NOT the vertices
+    # they referenced, leaving ~10K orphan vertices that pollute the ICP
+    # source point cloud and make alignment impossible (IoU drops to ~0.02).
+    # By pre-decimating here AND removing unreferenced vertices, we ensure
+    # load_and_simplify_mesh receives a clean mesh with no orphans.
+    MAX_FACES_FOR_ALIGNMENT = 5000
     if faces.shape[0] > MAX_FACES_FOR_ALIGNMENT:
         import open3d as o3d
         mesh_o3d = o3d.geometry.TriangleMesh()
@@ -480,6 +482,7 @@ def process_single_object(depth_model, pointmap_data, obj, device="cuda"):
         mesh_o3d.remove_duplicated_vertices()
         mesh_o3d.remove_degenerate_triangles()
         mesh_o3d = mesh_o3d.simplify_quadric_decimation(MAX_FACES_FOR_ALIGNMENT)
+        mesh_o3d.remove_unreferenced_vertices()
         vertices_dec = np.asarray(mesh_o3d.vertices).astype(np.float32)
         faces_dec = np.asarray(mesh_o3d.triangles).astype(np.int32)
         print(f"[POSE] {name}: pre-decimated {faces.shape[0]} → {faces_dec.shape[0]} faces "
