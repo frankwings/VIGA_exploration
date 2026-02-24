@@ -19,6 +19,7 @@ from pptx.enum.shapes import MSO_SHAPE
 DOCS = Path("docs")
 OUT_PART1 = Path("docs/VIGA_Project_Summary_v5_part1.pptx")
 OUT_PART2 = Path("docs/VIGA_Project_Summary_v5_part2.pptx")
+OUT_SAM3D = Path("docs/VIGA_SAM3D_Feb15-24.pptx")
 
 # Max pixels per inch for embedded images (used only in compressed mode)
 EMBED_DPI = 150
@@ -171,7 +172,7 @@ def add_img(slide, img_path, left, top, width=None, height=None):
 # Page builders
 # ============================================================================
 
-def make_title_slide(prs):
+def make_title_slide(prs, subtitle=None):
     s = prs.slides.add_slide(prs.slide_layouts[6])
     set_slide_bg(s, BG_DARK)
     add_text(s, Inches(1), Inches(1.5), Inches(11), Inches(1.5),
@@ -182,7 +183,7 @@ def make_title_slide(prs):
              "Iterative Generate / Render / Verify Loop using VLMs + Blender",
              18, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
     add_text(s, Inches(1), Inches(5.5), Inches(11), Inches(0.5),
-             "Project Summary  |  January - February 2026",
+             subtitle or "Project Summary  |  January - February 2026",
              16, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
 
 
@@ -562,16 +563,22 @@ DATES = [
             },
             {
                 "type": "analysis",
-                "title": "SAM3D / TRELLIS Architecture Comparison",
+                "title": "SAM3D / TRELLIS Architecture Comparison — Code Lineage & Module 4b",
                 "source_md": "20260224_SAM3D_TRELLIS_Architecture_Comparison.md",
                 "summary": "SAM3D backbone derived from TRELLIS v1 (MIT license) with Meta's MoT pose heads. "
                            "TRELLIS.2 uses O-Voxel octree (4B params). Module 4b: SS pose doesn't transfer.",
                 "key_points": [
-                    "SAM3D = TRELLIS v1 backbone + Meta additions (MoT, pointmap conditioning, pose decoder)",
-                    "TRELLIS.2 = 3-stage DiT, O-Voxel octree up to 1536^3 vs SLAT dense 64^3",
+                    "SAM3D = TRELLIS v1 backbone + Meta additions (MoT attention, pointmap conditioning, pose decoder)",
+                    "Code lineage: identical class names (SparseStructureFlowModel, SLatFlowModel, SLatGaussianDecoder), "
+                    "identical imports, identical __init__ signatures — strong evidence of TRELLIS v1 fork",
+                    "SAM3D ships BOTH original (T1-identical) and MoT-upgraded files (mot_sparse_structure_flow.py)",
+                    "TRELLIS v1: SLAT dense 64^3, Structured Latent, ~500M params, MIT license (CVPR'25 Spotlight)",
+                    "TRELLIS.2: O-Voxel octree up to 1536^3, 3-stage DiT, ~4B params, flexible resolution",
                     "SAM3D: 7 models ~3-4GB VRAM; TRELLIS.2: ~9-10GB VRAM (4B params)",
-                    "Module 4b negative result: SS model trained end-to-end with T1 decoder, doesn't transfer to T2",
-                    "Code lineage evidence: identical class names, imports, __init__ signatures between SAM3D and T1",
+                    "Key difference: SAM3D's SS model predicts object pose (S,R,T) end-to-end — TRELLIS.2 has no equivalent",
+                    "Module 4b (negative result): SS model's pose predictions trained with T1 decoder output space, "
+                    "don't transfer to T2 mesh geometry — TRELLIS2+SS IoU = 0.157, same as baseline 0.157",
+                    "Implication: TRELLIS.2 needs its own pose estimation module or external pose pipeline to match SAM3D alignment",
                 ],
                 "images": [],
             },
@@ -887,16 +894,34 @@ DATES = [
             },
             {
                 "type": "analysis",
-                "title": "Depth Alignment Analysis + SAM3D Pipeline Documentation",
+                "title": "Depth Alignment Analysis",
                 "source_md": "20260216_Depth_Alignment_Analysis.md",
-                "summary": "Diagnostic of depth alignment: layout optimizer prioritizes 2D silhouette, not depth. "
-                           "Documented full 6-step SAM3D pipeline with coordinate systems.",
+                "summary": "Diagnostic of depth alignment: layout optimizer prioritizes 2D silhouette, not depth.",
                 "key_points": [
                     "Test: per-vertex depth well-aligned for flat objects (1.4-5.3%) but severely misaligned for complex shapes (25-55%)",
                     "Root cause: layout post-optimization (Stage 5c) optimizes only 2D silhouette IoU, no depth loss",
                     "Recommended fix: add depth loss term to differentiable rendering in Stage 5c",
-                    "Pipeline documented: SAM → MoGe depth → TRELLIS 3D → pose decode → layout optimization → GLB export",
-                    "Critical: TRELLIS receives only RGBA image, NO MoGe depth; MoGe used only for pose/spatial anchoring",
+                ],
+                "images": [],
+            },
+            {
+                "type": "analysis",
+                "title": "SAM3D Pipeline Deep Dive — 6-Step Architecture",
+                "source_md": "20260216_SAM3D_Pipeline.md",
+                "summary": "Detailed decomposition of the full SAM3D pipeline: SAM segmentation → MoGe depth "
+                           "→ TRELLIS 3D reconstruction → pose decoding → layout optimization → GLB export. "
+                           "Key insight: TRELLIS sees only RGBA image, MoGe pointmap used only for pose.",
+                "key_points": [
+                    "Step 1 (SAM ViT-H): Full scene → N binary masks; conda env 'sam' (Py3.10)",
+                    "Step 2 (MoGe): Scene image → (H,W,3) pointmap + intrinsics; NOT a depth map — full 3D camera-space coords per pixel",
+                    "Step 3 (TRELLIS): Per-object masked RGBA → 3D mesh; SS (2 steps) + SLAT (12 steps) + dual decoder (32 Gaussians/voxel)",
+                    "Critical: TRELLIS receives ONLY RGBA image, NOT MoGe depth — shape comes purely from image appearance",
+                    "Step 4 (Pose Decode): SS model predicts initial S, R, T from sparse structure + pointmap conditioning",
+                    "Step 5 (Layout Optimization): 3 sub-stages — (5a) pointmap-based coarse, (5b) ICP refinement, (5c) differentiable silhouette rendering",
+                    "MoGe intrinsics are single source of camera calibration — wrong intrinsics cascade to all downstream alignment",
+                    "scene-image fix: original per-object SSI normalization fails at <5% pixel coverage → bypasses SSI with raw MoGe pointmap",
+                    "Step 6 (Export): Bake S, R, T into vertex positions → GLB with vertex colors in PyTorch3D camera space",
+                    "Coordinate systems: MoGe camera (X-right, Y-down, Z-forward) → PyTorch3D (X-left, Y-up, Z-forward) → Blender GLTF (Y-up → Z-up)",
                 ],
                 "images": [],
             },
@@ -1713,13 +1738,13 @@ DATES = [
 # Main
 # ============================================================================
 
-def _build_pptx(date_groups, include_intro=True):
+def _build_pptx(date_groups, include_intro=True, subtitle=None):
     prs = Presentation()
     prs.slide_width = SLIDE_W
     prs.slide_height = SLIDE_H
 
     # Intro slides (title + flow + environment)
-    make_title_slide(prs)
+    make_title_slide(prs, subtitle=subtitle)
     if include_intro:
         make_flow_slide(prs)
         make_env_slide(prs)
@@ -1759,6 +1784,17 @@ def main():
     prs2.save(str(OUT_PART2))
     date_range2 = f"{part2_dates[-1]['date']} to {part2_dates[0]['date']}"
     print(f"Saved: {OUT_PART2} ({len(prs2.slides)} slides, {date_range2})")
+
+    # SAM3D standalone deck: only Feb 15-24 dates (exclude pre-Feb-15 entries)
+    sam3d_dates = [d for d in DATES if d["date"] >= "2026-02-15"]
+    if sam3d_dates:
+        prs3 = _build_pptx(
+            sam3d_dates, include_intro=True,
+            subtitle="SAM3D Pipeline & TRELLIS Analysis  |  February 15-24, 2026",
+        )
+        prs3.save(str(OUT_SAM3D))
+        date_range3 = f"{sam3d_dates[-1]['date']} to {sam3d_dates[0]['date']}"
+        print(f"Saved: {OUT_SAM3D} ({len(prs3.slides)} slides, {date_range3})")
 
 
 if __name__ == "__main__":
