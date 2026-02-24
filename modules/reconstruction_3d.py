@@ -286,38 +286,82 @@ def reconstruct_trellis2(manifest_data: dict, output_dir: str,
         print(f"{TAG} TRELLIS2 FAILED (exit {result.returncode}, {elapsed:.1f}s)")
         print(f"{TAG} Check log: {log_path}")
 
-    # Collect results. NPZ files contain only numpy numeric arrays.
+    # Collect results.
+    # TRELLIS2's raw Flexicubes output is a triangle soup (0% edge sharing)
+    # which causes catastrophic alignment failure (IoU ~0.02 vs ~0.45).
+    # The GLB mesh is properly remeshed by o_voxel.postprocess.to_glb() with
+    # 86%+ edge sharing.  We load the GLB, convert from GLTF Y-up to Z-up
+    # (matching the pipeline's expected canonical frame), and save to NPZ.
+    # Y-up→Z-up: (x, y, z) → (x, z, -y)
+    R_yup_to_zup = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]], dtype=np.float32)
+
     results = {}
     for obj in objects:
         name = obj["name"]
         glb_path = os.path.join(output_dir, f"{name}.glb")
         mesh_path = os.path.join(output_dir, f"{name}_mesh.npz")
 
-        if os.path.exists(mesh_path):
-            data = np.load(mesh_path)
-            verts = data["vertices"]
-            faces = data["faces"]
-            vc = data["vertex_colors"] if "vertex_colors" in data else None
+        if os.path.exists(glb_path):
+            try:
+                import trimesh as _trimesh
+                glb_mesh = _trimesh.load(glb_path, force="mesh")
+                verts = np.asarray(glb_mesh.vertices, dtype=np.float32)
+                faces = np.asarray(glb_mesh.faces, dtype=np.int32)
 
-            # Decimate if requested
-            if max_faces > 0:
-                verts, faces, vc = decimate_mesh(verts, faces, vc, max_faces)
+                # Convert GLTF Y-up → Z-up canonical frame
+                verts = verts @ R_yup_to_zup
+
+                # Decimate if requested
+                vc = None
+                if max_faces > 0:
+                    verts, faces, vc = decimate_mesh(verts, faces, vc, max_faces)
+
                 save_dict = {"vertices": verts, "faces": faces}
-                if vc is not None:
-                    save_dict["vertex_colors"] = vc
                 np.savez(mesh_path, **save_dict)
+            except Exception as e:
+                print(f"{TAG} {name}: GLB load failed ({e}), falling back to NPZ")
+                if os.path.exists(mesh_path):
+                    data = np.load(mesh_path)
+                    verts = data["vertices"]
+                    faces = data["faces"]
+                    vc = data.get("vertex_colors")
+                    if max_faces > 0:
+                        verts, faces, vc = decimate_mesh(verts, faces, vc, max_faces)
+                        np.savez(mesh_path, vertices=verts, faces=faces)
+                else:
+                    print(f"{TAG} {name}: FAILED (no GLB or NPZ)")
+                    results[name] = None
+                    continue
 
             results[name] = {
-                "glb_path": glb_path if os.path.exists(glb_path) else None,
+                "glb_path": glb_path,
                 "mesh_path": mesh_path,
                 "vertices_count": int(verts.shape[0]),
                 "faces_count": int(faces.shape[0]),
                 "has_colors": vc is not None,
             }
-            glb_mb = os.path.getsize(glb_path) / (1024*1024) if os.path.exists(glb_path) else 0
+            glb_mb = os.path.getsize(glb_path) / (1024*1024)
             color_str = "with colors" if vc is not None else "no colors"
             print(f"{TAG} {name}: OK ({results[name]['vertices_count']} verts, "
                   f"{results[name]['faces_count']} faces, {color_str}, GLB {glb_mb:.1f}MB)")
+        elif os.path.exists(mesh_path):
+            # Fallback: use NPZ directly (legacy / no GLB)
+            data = np.load(mesh_path)
+            verts = data["vertices"]
+            faces = data["faces"]
+            vc = data.get("vertex_colors")
+            if max_faces > 0:
+                verts, faces, vc = decimate_mesh(verts, faces, vc, max_faces)
+                np.savez(mesh_path, vertices=verts, faces=faces)
+            results[name] = {
+                "glb_path": None,
+                "mesh_path": mesh_path,
+                "vertices_count": int(verts.shape[0]),
+                "faces_count": int(faces.shape[0]),
+                "has_colors": vc is not None,
+            }
+            print(f"{TAG} {name}: OK ({verts.shape[0]} verts, {faces.shape[0]} faces, "
+                  f"no GLB fallback)")
         else:
             print(f"{TAG} {name}: FAILED (no mesh output)")
             results[name] = None
