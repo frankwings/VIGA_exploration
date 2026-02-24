@@ -493,18 +493,18 @@ def make_pipeline_table_slide(prs, date_str, title):
         ("6", "Export", "Posed mesh", "GLB (PyTorch3D space)", "Baked transforms + vertex colors"),
     ]
 
-    # Dimensions
+    # Dimensions with larger fonts
     left = Inches(0.2)
     top = Inches(0.75)
     col_widths = [Inches(0.6), Inches(2.2), Inches(2.2), Inches(2.2), Inches(4.5)]
-    row_height = Inches(0.45)
+    row_height = Inches(0.65)  # Increased from 0.45
 
     # Draw table
     for row_idx, row in enumerate(rows):
         is_header = (row_idx == 0)
         bg_color = BG_CARD if is_header else BG_DARK
         text_color = ACCENT_GREEN if is_header else TEXT_SECONDARY
-        text_size = 11 if is_header else 10
+        text_size = 14 if is_header else 12  # Increased from 11 and 10
 
         x = left
         for col_idx, (col_width, cell_text) in enumerate(zip(col_widths, row)):
@@ -519,120 +519,107 @@ def make_pipeline_table_slide(prs, date_str, title):
                 line.line.color.rgb = TEXT_SECONDARY
                 line.line.width = Pt(0.5)
 
-            # Cell text
-            add_text(s, x + Inches(0.05), top + row_idx * row_height + Inches(0.05),
-                    col_width - Inches(0.1), row_height - Inches(0.05),
+            # Cell text with more padding for larger fonts
+            add_text(s, x + Inches(0.05), top + row_idx * row_height + Inches(0.08),
+                    col_width - Inches(0.1), row_height - Inches(0.15),
                     cell_text, text_size, text_color, is_header, PP_ALIGN.LEFT)
             x += col_width
 
 
 def make_pipeline_flowchart_slide(prs, date_str, title):
-    """SAM3D Pipeline: visual flowchart styled like VIGA pipeline, organized by sections."""
+    """SAM3D Pipeline: large-font flowchart with single-line text, filling entire slide."""
     s = prs.slides.add_slide(prs.slide_layouts[6])
     set_slide_bg(s, BG_DARK)
 
     # Title
-    add_text(s, Inches(0.5), Inches(0.15), Inches(12.5), Inches(0.5),
-             "SAM3D Image-to-3D Pipeline Architecture", 36, ACCENT_BLUE, True)
+    add_text(s, Inches(0.3), Inches(0.1), Inches(12.7), Inches(0.55),
+             "SAM3D Image-to-3D Pipeline", 40, ACCENT_BLUE, True)
 
-    # Left Column: Input → Segmentation → Depth
-    add_text(s, Inches(0.4), Inches(0.75), Inches(4.2), Inches(0.25),
-             "Input & Analysis", 14, ACCENT_GREEN, True)
+    # Left column
+    add_text(s, Inches(0.3), Inches(0.75), Inches(3.0), Inches(0.3),
+             "Input & Segmentation", 16, ACCENT_GREEN, True)
 
     # Input
-    add_rect(s, Inches(0.4), Inches(1.05), Inches(4.2), Inches(0.5), BG_CARD)
-    add_text(s, Inches(0.4), Inches(1.1), Inches(4.2), Inches(0.4),
-             "Input: Scene Image", 11, ACCENT_ORANGE, True, PP_ALIGN.CENTER)
+    add_rect(s, Inches(0.3), Inches(1.1), Inches(3.0), Inches(0.65), BG_CARD)
+    add_text(s, Inches(0.4), Inches(1.2), Inches(2.8), Inches(0.45),
+             "Input: Scene Image", 18, ACCENT_ORANGE, True, PP_ALIGN.CENTER)
 
-    # Arrow
-    add_text(s, Inches(0.4), Inches(1.52), Inches(4.2), Inches(0.15),
-             "▼", 16, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
+    add_text(s, Inches(0.3), Inches(1.78), Inches(3.0), Inches(0.25),
+             "▼", 20, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
 
     # Step 1: SAM
-    add_rect(s, Inches(0.4), Inches(1.7), Inches(4.2), Inches(1.2), BG_CARD)
-    add_text(s, Inches(0.6), Inches(1.75), Inches(3.8), Inches(0.25),
-             "Step 1: SAM Segmentation  (sam env)", 11, ACCENT_PURPLE, True)
-    add_multiline(s, Inches(0.6), Inches(2.02), Inches(3.8), Inches(0.85), [
-        "Model: SAM ViT-H (Segment Anything)",
-        "Output: N binary masks (H, W) uint8",
-        "Per-object mask for each object in scene",
-    ], 9, TEXT_SECONDARY)
+    add_rect(s, Inches(0.3), Inches(2.08), Inches(3.0), Inches(1.0), BG_CARD)
+    add_text(s, Inches(0.4), Inches(2.15), Inches(2.8), Inches(0.32),
+             "Step 1: SAM Segmentation", 16, ACCENT_PURPLE, True, PP_ALIGN.CENTER)
+    add_text(s, Inches(0.4), Inches(2.5), Inches(2.8), Inches(0.45),
+             "N binary masks (H, W)", 14, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
 
-    # Arrow
-    add_text(s, Inches(0.4), Inches(2.85), Inches(4.2), Inches(0.15),
-             "▼", 16, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
+    add_text(s, Inches(0.3), Inches(3.12), Inches(3.0), Inches(0.25),
+             "▼", 20, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
 
     # Step 2: MoGe
-    add_rect(s, Inches(0.4), Inches(3.03), Inches(4.2), Inches(1.2), BG_CARD)
-    add_text(s, Inches(0.6), Inches(3.08), Inches(3.8), Inches(0.25),
-             "Step 2: MoGe Depth  (sam3d_py311 env)", 11, ACCENT_BLUE, True)
-    add_multiline(s, Inches(0.6), Inches(3.35), Inches(3.8), Inches(0.85), [
-        "Model: Monocular Geometry Estimator",
-        "Output: Pointmap (H,W,3) + intrinsics",
-        "3D coords per pixel in camera space",
-    ], 9, TEXT_SECONDARY)
+    add_rect(s, Inches(0.3), Inches(3.42), Inches(3.0), Inches(1.0), BG_CARD)
+    add_text(s, Inches(0.4), Inches(3.49), Inches(2.8), Inches(0.32),
+             "Step 2: MoGe Depth", 16, ACCENT_BLUE, True, PP_ALIGN.CENTER)
+    add_text(s, Inches(0.4), Inches(3.84), Inches(2.8), Inches(0.45),
+             "Pointmap (H,W,3) + intrinsics", 14, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
 
-    # Right Column: 3D Reconstruction → Pose → Export
-    add_text(s, Inches(4.8), Inches(0.75), Inches(7.8), Inches(0.25),
-             "3D Reconstruction & Pose Estimation", 14, ACCENT_GREEN, True)
+    # Middle column
+    add_text(s, Inches(3.6), Inches(0.75), Inches(3.2), Inches(0.3),
+             "3D Reconstruction", 16, ACCENT_GREEN, True)
 
     # Step 3: TRELLIS
-    add_rect(s, Inches(4.8), Inches(1.05), Inches(7.8), Inches(1.2), BG_CARD)
-    add_text(s, Inches(5.0), Inches(1.1), Inches(7.4), Inches(0.25),
-             "Step 3: TRELLIS 3D Reconstruction  (sam3d_py311 env)", 11, ACCENT_GREEN, True)
-    add_multiline(s, Inches(5.0), Inches(1.37), Inches(7.4), Inches(0.85), [
-        "Per-object: Feed masked RGBA image (NOT depth!) to TRELLIS",
-        "SS (2 steps) + SLAT (12 steps) + Dual Decoder (32 Gaussians/voxel)",
-        "Output: 3D mesh (80K vertices, vertex colors) in model space",
-    ], 9, TEXT_SECONDARY)
+    add_rect(s, Inches(3.6), Inches(1.1), Inches(3.2), Inches(1.0), BG_CARD)
+    add_text(s, Inches(3.7), Inches(1.17), Inches(3.0), Inches(0.32),
+             "Step 3: TRELLIS 3D", 16, ACCENT_GREEN, True, PP_ALIGN.CENTER)
+    add_text(s, Inches(3.7), Inches(1.52), Inches(3.0), Inches(0.45),
+             "80K verts, vertex colors", 14, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
 
-    # Arrow
-    add_text(s, Inches(4.8), Inches(2.22), Inches(7.8), Inches(0.15),
-             "▼", 16, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
+    add_text(s, Inches(3.6), Inches(2.15), Inches(3.2), Inches(0.25),
+             "▼", 20, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
 
-    # Step 4: Pose Decode + Step 5: Optimization
-    add_rect(s, Inches(4.8), Inches(2.4), Inches(3.8), Inches(1.35), BG_CARD)
-    add_text(s, Inches(5.0), Inches(2.45), Inches(3.4), Inches(0.25),
-             "Step 4: Pose Decode  (SS Model)", 11, ACCENT_ORANGE, True)
-    add_multiline(s, Inches(5.0), Inches(2.72), Inches(3.4), Inches(1.0), [
-        "Sparse Structure model predicts",
-        "initial pose: scale, rotation,",
-        "translation (S, R, T) per object",
-        "Input: sparse struct + pointmap",
-    ], 9, TEXT_SECONDARY)
+    # Step 4+5: Pose
+    add_rect(s, Inches(3.6), Inches(2.45), Inches(3.2), Inches(2.0), BG_CARD)
+    add_text(s, Inches(3.7), Inches(2.52), Inches(3.0), Inches(0.32),
+             "Step 4: SS Model Pose", 16, ACCENT_ORANGE, True, PP_ALIGN.CENTER)
+    add_text(s, Inches(3.7), Inches(2.88), Inches(3.0), Inches(0.35),
+             "Predict S, R, T", 14, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
+    add_text(s, Inches(3.7), Inches(3.28), Inches(3.0), Inches(0.32),
+             "Step 5: Optimize Layout", 16, ACCENT_PURPLE, True, PP_ALIGN.CENTER)
+    add_text(s, Inches(3.7), Inches(3.64), Inches(3.0), Inches(0.35),
+             "Refine with ICP + rendering", 14, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
 
-    add_rect(s, Inches(8.7), Inches(2.4), Inches(3.8), Inches(1.35), BG_CARD)
-    add_text(s, Inches(8.9), Inches(2.45), Inches(3.4), Inches(0.25),
-             "Step 5: Layout Optimization", 11, ACCENT_PURPLE, True)
-    add_multiline(s, Inches(8.9), Inches(2.72), Inches(3.4), Inches(1.0), [
-        "5a. Coarse: pointmap-based",
-        "5b. ICP: depth refinement",
-        "5c. Silhouette: differentiable",
-        "rendering (refine S, R, T)",
-    ], 9, TEXT_SECONDARY)
-
-    # Arrow
-    add_text(s, Inches(4.8), Inches(3.7), Inches(7.8), Inches(0.15),
-             "▼", 16, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
+    add_text(s, Inches(3.6), Inches(4.48), Inches(3.2), Inches(0.25),
+             "▼", 20, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
 
     # Step 6: Export
-    add_rect(s, Inches(4.8), Inches(3.88), Inches(7.8), Inches(0.95), BG_CARD)
-    add_text(s, Inches(5.0), Inches(3.93), Inches(7.4), Inches(0.25),
-             "Step 6: Export  (Final GLB)", 11, ACCENT_GREEN, True)
-    add_multiline(s, Inches(5.0), Inches(4.2), Inches(7.4), Inches(0.6), [
-        "Bake S, R, T into vertex positions  •  GLB in PyTorch3D camera space (X-left, Y-up, Z-forward)",
-    ], 9, TEXT_SECONDARY)
+    add_rect(s, Inches(3.6), Inches(4.78), Inches(3.2), Inches(0.85), BG_CARD)
+    add_text(s, Inches(3.7), Inches(4.85), Inches(3.0), Inches(0.32),
+             "Step 6: Export GLB", 16, ACCENT_GREEN, True, PP_ALIGN.CENTER)
+    add_text(s, Inches(3.7), Inches(5.2), Inches(3.0), Inches(0.35),
+             "PyTorch3D camera space", 14, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
 
-    # Bottom: Key Insights
-    add_rect(s, Inches(0.4), Inches(5.0), Inches(12.1), Inches(1.9), BG_CARD)
-    add_text(s, Inches(0.6), Inches(5.05), Inches(11.7), Inches(0.25),
-             "🔑 Key Insights", 12, ACCENT_PURPLE, True)
-    add_multiline(s, Inches(0.6), Inches(5.32), Inches(11.7), Inches(1.55), [
-        "• MoGe intrinsics are single source of camera calibration for entire pipeline — wrong intrinsics cascade to all downstream stages",
-        "• TRELLIS receives ONLY RGBA image, NOT MoGe depth — 3D shape comes purely from image appearance; MoGe depth used only for pose/anchoring",
-        "• scene-image flag: Original per-object SSI normalization fails <5% pixel coverage → bypassed with raw MoGe pointmap",
-        "• Coordinate flow: MoGe camera (X-right, Y-down, Z-fwd) → PyTorch3D (X-left, Y-up, Z-fwd) → Blender GLTF (Y-up → Z-up)",
-    ], 9, TEXT_SECONDARY)
+    # Right column: Key insights
+    add_text(s, Inches(7.2), Inches(0.75), Inches(5.5), Inches(0.3),
+             "Key Technical Details", 16, ACCENT_GREEN, True)
+
+    add_rect(s, Inches(7.2), Inches(1.1), Inches(5.5), Inches(1.8), BG_CARD)
+    add_text(s, Inches(7.3), Inches(1.18), Inches(5.3), Inches(0.32),
+             "MoGe = Single Source of Camera Calibration", 14, ACCENT_ORANGE, True, PP_ALIGN.LEFT)
+    add_text(s, Inches(7.3), Inches(1.53), Inches(5.3), Inches(1.3),
+             "Wrong intrinsics cascade to all downstream stages", 12, TEXT_SECONDARY, False, PP_ALIGN.LEFT)
+
+    add_rect(s, Inches(7.2), Inches(3.0), Inches(5.5), Inches(1.8), BG_CARD)
+    add_text(s, Inches(7.3), Inches(3.08), Inches(5.3), Inches(0.32),
+             "TRELLIS Receives ONLY RGBA Image", 14, ACCENT_PURPLE, True, PP_ALIGN.LEFT)
+    add_text(s, Inches(7.3), Inches(3.43), Inches(5.3), Inches(1.3),
+             "NOT depth. 3D shape from appearance only. MoGe used for pose anchoring", 12, TEXT_SECONDARY, False, PP_ALIGN.LEFT)
+
+    add_rect(s, Inches(7.2), Inches(4.9), Inches(5.5), Inches(0.73), BG_CARD)
+    add_text(s, Inches(7.3), Inches(4.97), Inches(5.3), Inches(0.32),
+             "Coordinate Space Flow", 14, ACCENT_BLUE, True, PP_ALIGN.LEFT)
+    add_text(s, Inches(7.3), Inches(5.32), Inches(5.3), Inches(0.25),
+             "MoGe → PyTorch3D → Blender GLTF", 12, TEXT_SECONDARY, False, PP_ALIGN.LEFT)
 
 
 def make_architecture_table_slide(prs, date_str, title):
@@ -660,18 +647,18 @@ def make_architecture_table_slide(prs, date_str, title):
         ("IoU (Dining)", "N/A (baseline)", "0.53 (reference)", "0.23 (w/o SS)"),
     ]
 
-    # Dimensions for 4-column table
+    # Dimensions for 4-column table with larger fonts
     left = Inches(0.15)
     top = Inches(0.75)
     col_widths = [Inches(2.2), Inches(3.0), Inches(3.5), Inches(3.8)]
-    row_height = Inches(0.42)
+    row_height = Inches(0.70)  # Increased from 0.42
 
     # Draw table
     for row_idx, row in enumerate(rows):
         is_header = (row_idx == 0)
         bg_color = BG_CARD if is_header else BG_DARK
         text_color = ACCENT_GREEN if is_header else TEXT_SECONDARY
-        text_size = 10 if is_header else 8.5
+        text_size = 16 if is_header else 12  # Increased from 10 and 8.5
 
         x = left
         for col_idx, (col_width, cell_text) in enumerate(zip(col_widths, row)):
@@ -686,9 +673,9 @@ def make_architecture_table_slide(prs, date_str, title):
                 line.line.color.rgb = TEXT_SECONDARY
                 line.line.width = Pt(0.5)
 
-            # Cell text
-            add_text(s, x + Inches(0.04), top + row_idx * row_height + Inches(0.03),
-                    col_width - Inches(0.08), row_height - Inches(0.06),
+            # Cell text with more padding for larger fonts
+            add_text(s, x + Inches(0.05), top + row_idx * row_height + Inches(0.08),
+                    col_width - Inches(0.1), row_height - Inches(0.15),
                     cell_text, text_size, text_color, is_header, PP_ALIGN.LEFT)
             x += col_width
 
