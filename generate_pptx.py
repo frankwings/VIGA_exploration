@@ -627,9 +627,9 @@ def make_architecture_table_slide(prs, date_str, title):
     s = prs.slides.add_slide(prs.slide_layouts[6])
     set_slide_bg(s, BG_DARK)
 
-    # Title (smaller to make room for larger table)
-    add_text(s, Inches(0.2), Inches(0.05), Inches(12.9), Inches(0.35),
-             f"{date_str}  —  {title}", 20, ACCENT_BLUE, True)
+    # Title
+    add_text(s, Inches(0.2), Inches(0.1), Inches(12.9), Inches(0.4),
+             f"{date_str}  —  {title}", 22, ACCENT_BLUE, True)
 
     # Table data with 4 columns
     rows = [
@@ -647,11 +647,11 @@ def make_architecture_table_slide(prs, date_str, title):
         ("IoU (Dining)", "N/A (baseline)", "0.53 (reference)", "0.23 (w/o SS)"),
     ]
 
-    # Dimensions: wider and taller table filling most of slide
-    left = Inches(0.1)
-    top = Inches(0.45)
-    col_widths = [Inches(2.4), Inches(3.4), Inches(3.8), Inches(3.8)]  # Wider columns
-    row_height = Inches(0.85)  # Taller rows
+    # Dimensions: fits within slide (13" wide x 7.5" tall)
+    left = Inches(0.15)
+    top = Inches(0.6)
+    col_widths = [Inches(2.1), Inches(3.2), Inches(3.2), Inches(3.2)]  # Total 11.7" + margins
+    row_height = Inches(0.54)  # Fits all 12 rows on one slide
 
     # Draw table
     for row_idx, row in enumerate(rows):
