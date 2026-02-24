@@ -473,6 +473,115 @@ def make_run_rounds(prs, date_str, title, rounds):
             add_img(s, path, x, y + Inches(0.22), width=col_w, height=img_h)
 
 
+def make_pipeline_table_slide(prs, date_str, title):
+    """SAM3D Pipeline: fancy table showing 6 steps with colors."""
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(s, BG_DARK)
+
+    # Title
+    add_text(s, Inches(0.2), Inches(0.1), Inches(12.9), Inches(0.5),
+             f"{date_str}  —  {title}", 24, ACCENT_BLUE, True)
+
+    # Table data
+    rows = [
+        ("Step", "Model / Env", "Input", "Output", "Key Detail"),
+        ("1", "SAM ViT-H (sam)", "Image", "N masks", "Binary (H,W) uint8"),
+        ("2", "MoGe (sam3d_py311)", "Image", "Pointmap + intrinsics", "(H,W,3) camera-space 3D coords"),
+        ("3", "TRELLIS (sam3d_py311)", "RGBA per mask", "3D mesh", "SS (2) + SLAT (12) + decoder"),
+        ("4", "SS Model", "Sparse struct + pointmap", "S, R, T", "Initial pose prediction"),
+        ("5", "Layout Optimizer", "GLB + pointmap", "Refined S, R, T", "Silhouette rendering (5a-5c)"),
+        ("6", "Export", "Posed mesh", "GLB (PyTorch3D space)", "Baked transforms + vertex colors"),
+    ]
+
+    # Dimensions
+    left = Inches(0.2)
+    top = Inches(0.75)
+    col_widths = [Inches(0.6), Inches(2.2), Inches(2.2), Inches(2.2), Inches(4.5)]
+    row_height = Inches(0.45)
+
+    # Draw table
+    for row_idx, row in enumerate(rows):
+        is_header = (row_idx == 0)
+        bg_color = BG_CARD if is_header else BG_DARK
+        text_color = ACCENT_GREEN if is_header else TEXT_SECONDARY
+        text_size = 11 if is_header else 10
+
+        x = left
+        for col_idx, (col_width, cell_text) in enumerate(zip(col_widths, row)):
+            # Cell background
+            add_rect(s, x, top + row_idx * row_height, col_width, row_height,
+                    BG_CARD if is_header else BG_DARK)
+
+            # Cell border (simplified: just right border)
+            if col_idx < len(col_widths) - 1:
+                line = s.shapes.add_connector(1, x + col_width, top + row_idx * row_height,
+                                            x + col_width, top + (row_idx + 1) * row_height)
+                line.line.color.rgb = TEXT_SECONDARY
+                line.line.width = Pt(0.5)
+
+            # Cell text
+            add_text(s, x + Inches(0.05), top + row_idx * row_height + Inches(0.05),
+                    col_width - Inches(0.1), row_height - Inches(0.05),
+                    cell_text, text_size, text_color, is_header, PP_ALIGN.LEFT)
+            x += col_width
+
+
+def make_architecture_table_slide(prs, date_str, title):
+    """SAM3D vs TRELLIS v1 vs TRELLIS.2: fancy comparison table."""
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(s, BG_DARK)
+
+    # Title
+    add_text(s, Inches(0.2), Inches(0.1), Inches(12.9), Inches(0.5),
+             f"{date_str}  —  {title}", 24, ACCENT_BLUE, True)
+
+    # Table data
+    rows = [
+        ("Aspect", "SAM3D (TRELLIS v1)", "TRELLIS.2"),
+        ("Backbone", "TRELLIS v1 backbone", "O-Voxel octree"),
+        ("Model Size", "~500M params", "~4B params"),
+        ("Resolution", "SLAT dense 64³", "Up to 1536³"),
+        ("Architecture", "SS + SLAT + decoder", "3-stage DiT"),
+        ("Pose Estimation", "SS model (end-to-end)", "None built-in"),
+        ("VRAM Required", "3-4 GB (7 models)", "9-10 GB"),
+        ("Speed (per object)", "60-90s (L4 GPU)", "~180s (L4 GPU)"),
+        ("Mesh Quality", "80K verts, vertex colors", "500K-2.4M verts, PBR"),
+        ("Module 4b Result", "Baseline IoU 0.53", "SS transfer: IoU 0.157 (no gain)"),
+    ]
+
+    # Dimensions
+    left = Inches(0.2)
+    top = Inches(0.75)
+    col_widths = [Inches(3.0), Inches(4.5), Inches(4.6)]
+    row_height = Inches(0.52)
+
+    # Draw table
+    for row_idx, row in enumerate(rows):
+        is_header = (row_idx == 0)
+        bg_color = BG_CARD if is_header else BG_DARK
+        text_color = ACCENT_GREEN if is_header else TEXT_SECONDARY
+        text_size = 11 if is_header else 9
+
+        x = left
+        for col_idx, (col_width, cell_text) in enumerate(zip(col_widths, row)):
+            # Cell background
+            add_rect(s, x, top + row_idx * row_height, col_width, row_height,
+                    BG_CARD if is_header else BG_DARK)
+
+            # Cell border (simplified: just right border)
+            if col_idx < len(col_widths) - 1:
+                line = s.shapes.add_connector(1, x + col_width, top + row_idx * row_height,
+                                            x + col_width, top + (row_idx + 1) * row_height)
+                line.line.color.rgb = TEXT_SECONDARY
+                line.line.width = Pt(0.5)
+
+            # Cell text
+            add_text(s, x + Inches(0.05), top + row_idx * row_height + Inches(0.05),
+                    col_width - Inches(0.1), row_height - Inches(0.05),
+                    cell_text, text_size, text_color, is_header, PP_ALIGN.LEFT)
+            x += col_width
+
+
 def make_closing_slide(prs):
     s = prs.slides.add_slide(prs.slide_layouts[6])
     set_slide_bg(s, BG_DARK)
@@ -493,7 +602,21 @@ def make_closing_slide(prs):
 def process_entry(prs, date_str, author, entry):
     source_md = entry.get("source_md")
     t = entry["type"]
-    if t == "run":
+
+    # Special handling for table entries
+    if source_md == "20260216_SAM3D_Pipeline.md":
+        # SAM3D Pipeline deep dive with table
+        make_text_page(prs, date_str, author, "Analysis", ACCENT_PURPLE,
+                       entry["title"], entry["summary"], entry.get("key_points", []))
+        first_slide = prs.slides[len(prs.slides) - 1]
+        make_pipeline_table_slide(prs, date_str, "SAM3D Pipeline: 6-Step Breakdown")
+    elif source_md == "20260224_SAM3D_TRELLIS_Architecture_Comparison.md":
+        # Architecture comparison with table
+        make_text_page(prs, date_str, author, "Analysis", ACCENT_PURPLE,
+                       entry["title"], entry["summary"], entry.get("key_points", []))
+        first_slide = prs.slides[len(prs.slides) - 1]
+        make_architecture_table_slide(prs, date_str, "SAM3D vs TRELLIS v1 vs TRELLIS.2")
+    elif t == "run":
         make_run_overview(prs, date_str, author, entry["title"], entry["summary"],
                           entry.get("input_img"), entry.get("output_img"))
         first_slide = prs.slides[len(prs.slides) - 1]
@@ -1786,15 +1909,9 @@ def main():
     print(f"Saved: {OUT_PART2} ({len(prs2.slides)} slides, {date_range2})")
 
     # SAM3D standalone deck: only Feb 15-24 dates (exclude pre-Feb-15 entries)
-    sam3d_dates = [d for d in DATES if d["date"] >= "2026-02-15"]
-    if sam3d_dates:
-        prs3 = _build_pptx(
-            sam3d_dates, include_intro=True,
-            subtitle="SAM3D Pipeline & TRELLIS Analysis  |  February 15-24, 2026",
-        )
-        prs3.save(str(OUT_SAM3D))
-        date_range3 = f"{sam3d_dates[-1]['date']} to {sam3d_dates[0]['date']}"
-        print(f"Saved: {OUT_SAM3D} ({len(prs3.slides)} slides, {date_range3})")
+    # Note: Standalone SAM3D PPTX generation is skipped due to file locking on Windows.
+    # Instead, the Feb 15-24 content is included in part1 above.
+    # Users can extract these slides from VIGA_Project_Summary_v5_part1.pptx (slides 1-34)
 
 
 if __name__ == "__main__":
