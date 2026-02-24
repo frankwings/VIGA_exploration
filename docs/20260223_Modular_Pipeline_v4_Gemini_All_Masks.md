@@ -80,6 +80,18 @@ Total: 649.0s (10.8 min), model load: ~34s.
 
 ## Module 5: Register (with SS Pose Fix)
 
+### What is SS Pose?
+
+**SS = Sparse Structure** — the first stage of the TRELLIS pipeline. TRELLIS has two generation stages:
+
+1. **SS (Sparse Structure)** — predicts a coarse voxel grid from the input image
+2. **SLAT (Sparse Latent)** — refines it into a detailed mesh
+
+During the SS stage, TRELLIS also predicts an initial **rotation, translation, and scale** — its estimate of how the object is oriented relative to the camera. These values are saved in the checkpoint NPZ (`rotation`, `translation`, `scale` keys).
+
+- **SS_pose=True**: Module 5 (Registration) uses these TRELLIS-predicted rotation/translation/scale as the **starting point** for the ICP optimizer, which then refines from there.
+- **SS_pose=False**: The optimizer starts from **identity rotation** (no rotation) — a much worse starting point that often converges to bad local minima.
+
 ### Bug Fix: SS Initial Pose Not Passed Through
 
 Commit `e93d61a` fixed a critical bug: `registration_2d3d.py`'s `main()` function was not copying `checkpoint_path` from the reconstruct manifest to the object entries passed to `run_pose_alignment()`. This meant `SS_pose=False` for all objects despite the SS pose data being available in the mesh NPZ. The optimizer fell back to identity rotation, converging to worse local minima.
