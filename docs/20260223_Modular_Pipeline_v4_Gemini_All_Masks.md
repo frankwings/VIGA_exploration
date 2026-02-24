@@ -127,20 +127,20 @@ With the SS pose fix, 9 of 10 objects are now included in the scene render (only
 
 ---
 
-## Rotation GIFs
+## Per-Object Results: Masked Image vs Rotation GIF
 
-| Object | IoU | Y-Rotation |
-|---|---|---|
-| table | 0.40 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/table_y_rotation.gif) |
-| sofa | 0.30 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/sofa_y_rotation.gif) |
-| wooden_chair | -1.0 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/wooden_chair_y_rotation.gif) |
-| tablecloth | 0.48 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/tablecloth_y_rotation.gif) |
-| chair_cushion | 0.69 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/chair_cushion_y_rotation.gif) |
-| armchair | 0.21 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/armchair_y_rotation.gif) |
-| neck_pillow_and_cushion | 0.89 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/neck_pillow_and_cushion_y_rotation.gif) |
-| newspaper | 0.79 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/newspaper_y_rotation.gif) |
-| plant_in_pot | 0.25 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/plant_in_pot_y_rotation.gif) |
-| placemat | 0.60 | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/placemat_y_rotation.gif) |
+| Object | IoU | Masked Image | Y-Rotation |
+|---|---|---|---|
+| table | 0.40 | ![](test_results_images/modular_dining_v4_ss/masks/table.png) | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/table_y_rotation.gif) |
+| sofa | 0.30 | ![](test_results_images/modular_dining_v4_ss/masks/sofa.png) | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/sofa_y_rotation.gif) |
+| wooden_chair | -1.0 | ![](test_results_images/modular_dining_v4_ss/masks/wooden_chair.png) | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/wooden_chair_y_rotation.gif) |
+| tablecloth | 0.48 | ![](test_results_images/modular_dining_v4_ss/masks/tablecloth.png) | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/tablecloth_y_rotation.gif) |
+| chair_cushion | 0.69 | ![](test_results_images/modular_dining_v4_ss/masks/chair_cushion.png) | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/chair_cushion_y_rotation.gif) |
+| armchair | 0.21 | ![](test_results_images/modular_dining_v4_ss/masks/armchair.png) | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/armchair_y_rotation.gif) |
+| neck_pillow_and_cushion | 0.89 | ![](test_results_images/modular_dining_v4_ss/masks/neck_pillow_and_cushion.png) | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/neck_pillow_and_cushion_y_rotation.gif) |
+| newspaper | 0.79 | ![](test_results_images/modular_dining_v4_ss/masks/newspaper.png) | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/newspaper_y_rotation.gif) |
+| plant_in_pot | 0.25 | ![](test_results_images/modular_dining_v4_ss/masks/plant_in_pot.png) | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/plant_in_pot_y_rotation.gif) |
+| placemat | 0.60 | ![](test_results_images/modular_dining_v4_ss/masks/placemat.png) | ![](test_results_images/modular_dining_v4_ss/rotation_gifs/placemat_y_rotation.gif) |
 
 ---
 
