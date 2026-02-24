@@ -536,6 +536,430 @@ def process_entry(prs, date_str, author, entry):
 
 DATES = [
     # -------------------------------------------------------------------------
+    # 2026-02-24
+    # -------------------------------------------------------------------------
+    {
+        "date": "2026-02-24",
+        "author": "kingyy (gcp-L4/vscode/opus/hum)",
+        "entries": [
+            {
+                "type": "analysis",
+                "title": "TRELLIS2 vs SAM3D — Dining Scene Comparison",
+                "source_md": "20260224_TRELLIS2_vs_SAM3D_Dining_Comparison.md",
+                "summary": "Head-to-head comparison: SAM3D 2.3x better IoU (0.53 vs 0.23), 2.1x faster, "
+                           "28x smaller GLBs. Gap driven by missing SS pose prior in TRELLIS2.",
+                "key_points": [
+                    "SAM3D avg IoU 0.53 (best: neck_pillow 0.90) vs TRELLIS2 0.23 (best: pillow_and_blanket 0.58)",
+                    "SAM3D total 568s (9.5 min) vs TRELLIS2 1186s (19.8 min) — 2.1x faster",
+                    "SAM3D GLBs 1.2-1.7 MB (80K verts) vs T2 18-81 MB (0.5-2.4M verts); more polys != better alignment",
+                    "Only 1 comparable object improved with T2 (sofa_cover +0.15); newspaper regressed most (0.84 → 0.15)",
+                    "Root cause: TRELLIS2 has no SS pose prior; Module 4b confirmed SS doesn't transfer cross-architecture",
+                ],
+                "images": [
+                    ("T2 Masks", "test_results_images/trellis_comparison/t2_mask_grid.png"),
+                    ("T2 vs Target", "test_results_images/trellis_comparison/t2_comparison_fixed.png"),
+                ],
+            },
+            {
+                "type": "analysis",
+                "title": "SAM3D / TRELLIS Architecture Comparison",
+                "source_md": "20260224_SAM3D_TRELLIS_Architecture_Comparison.md",
+                "summary": "SAM3D backbone derived from TRELLIS v1 (MIT license) with Meta's MoT pose heads. "
+                           "TRELLIS.2 uses O-Voxel octree (4B params). Module 4b: SS pose doesn't transfer.",
+                "key_points": [
+                    "SAM3D = TRELLIS v1 backbone + Meta additions (MoT, pointmap conditioning, pose decoder)",
+                    "TRELLIS.2 = 3-stage DiT, O-Voxel octree up to 1536^3 vs SLAT dense 64^3",
+                    "SAM3D: 7 models ~3-4GB VRAM; TRELLIS.2: ~9-10GB VRAM (4B params)",
+                    "Module 4b negative result: SS model trained end-to-end with T1 decoder, doesn't transfer to T2",
+                    "Code lineage evidence: identical class names, imports, __init__ signatures between SAM3D and T1",
+                ],
+                "images": [],
+            },
+        ],
+    },
+
+    # -------------------------------------------------------------------------
+    # 2026-02-23
+    # -------------------------------------------------------------------------
+    {
+        "date": "2026-02-23",
+        "author": "kingyy (gcp-L4/vscode/opus/hum)",
+        "entries": [
+            {
+                "type": "run",
+                "title": "Modular Pipeline v4 — Gemini VLM + SS Pose Fix",
+                "source_md": "20260223_Modular_Pipeline_v4_Gemini_All_Masks.md",
+                "summary": "Switched VLM to Gemini 2.5 Flash, kept all 10 masks. SS pose fix (commit e93d61a) "
+                           "improved avg IoU +0.055 (0.396 → 0.451). 9/10 objects in final scene.",
+                "input_img": "test_results_images/modular_dining_v4/recognize_grid.png",
+                "output_img": "test_results_images/modular_dining_v4_ss/side_by_side.png",
+                "rounds": [],
+                "key_points": [
+                    "VLM: GPT-4o → Gemini 2.5 Flash (free tier, 5 req/min with backoff)",
+                    "All 10 masks kept (no background rejection); 9/10 objects in final scene",
+                    "SS pose fix: registration passes checkpoint_path → ICP gets good starting pose",
+                    "Biggest improvements: placemat +0.18, plant +0.12, neck_pillow +0.10, armchair +0.13",
+                    "IoU filter: exclude objects < 0.15 from render to prevent visual corruption",
+                ],
+                "images": [
+                    ("Scene Render", "test_results_images/modular_dining_v4_ss/scene_render.png"),
+                    ("Flat Render", "test_results_images/modular_dining_v4_ss/flat_scene_render.png"),
+                    ("Projection Overlay", "test_results_images/modular_dining_v4_ss/projection_overlay.png"),
+                ],
+            },
+            {
+                "type": "analysis",
+                "title": "Modular Pipeline v3 — Large Mask Filter Test",
+                "source_md": "20260223_Modular_Pipeline_v3_Large_Masks.md",
+                "summary": "Raised max_area_ratio 50% → 95% to capture large masks. 2 new large masks detected "
+                           "but GPT-4o correctly rejected both as background. No net change in scene.",
+                "key_points": [
+                    "Segment filter: max_area_ratio 0.50 → 0.95; 10 masks (vs 9 in v2)",
+                    "Both large masks (33.3%, 17.0%) classified as background by GPT-4o",
+                    "Same 8 foreground objects reconstructed; IoU variance from non-deterministic VLM naming",
+                    "Finding: large mask filter has no practical impact; VLM correctly identifies background",
+                ],
+                "images": [
+                    ("v3 Masks", "test_results_images/modular_dining_v3/scene_render.png"),
+                    ("v3 Side-by-Side", "test_results_images/modular_dining_v3/flat_side_by_side.png"),
+                ],
+            },
+        ],
+    },
+
+    # -------------------------------------------------------------------------
+    # 2026-02-22
+    # -------------------------------------------------------------------------
+    {
+        "date": "2026-02-22",
+        "author": "kingyy (gcp-L4/vscode/opus/hum)",
+        "entries": [
+            {
+                "type": "run",
+                "title": "SAM3D TRELLIS1 Dining — Full Pipeline Results",
+                "source_md": "20260222_TRELLIS1_Dining_Results.md",
+                "summary": "Complete SAM3D pipeline: 8 objects, avg IoU 0.53, 9.5 min total. "
+                           "Batch TRELLIS1 with model caching. Best: neck_pillow 0.90.",
+                "input_img": "test_results_images/modular_dining_v2/target.jpg",
+                "output_img": "test_results_images/modular_dining_v2/registration_v2_side_by_side.png",
+                "rounds": [],
+                "key_points": [
+                    "8 objects: neck_pillow (0.90), newspaper (0.84), broken_tile (0.72), placemat (0.62)",
+                    "table_with_tablecloth (0.48), sofa (0.25), colander (0.24), chair (0.23)",
+                    "SAM 52.7s + TRELLIS1 batch 515.2s = 567.9s (9.5 min) total",
+                    "Rotation GIFs: Y-axis turntable + X-axis tumble per object via Blender Cycles 512x512",
+                ],
+                "images": [
+                    ("Scene Comparison", "test_results_images/modular_dining_v2/registration_v2_projection_overlay.png"),
+                ],
+            },
+            {
+                "type": "run",
+                "title": "Modular SAM3D Pipeline — 5-Module Design",
+                "source_md": "20260222_Modular_Pipeline_Dining_Results.md",
+                "summary": "Decomposed monolithic pipeline into 5 modules (segment→recognize→monodepth→reconstruct→register). "
+                           "v2 fix: SS pose from checkpoint → avg IoU 0.414 → 0.543.",
+                "input_img": "test_results_images/modular_dining_v2/segment_all_masks_grid.png",
+                "output_img": "test_results_images/modular_dining_v2/registration_v2_scene_render.png",
+                "rounds": [],
+                "key_points": [
+                    "5 modules: segment (SAM) → recognize (VLM) → monodepth (MoGe) → reconstruct (TRELLIS) → register (ICP+grad)",
+                    "JSON manifests between modules for independence and replay",
+                    "v2 critical fix: loads SS pose from checkpoint NPZ, applies square padding + isotropic intrinsics",
+                    "Timing: 30s SAM + 45s VLM + 10s MoGe + 490s TRELLIS + 85s registration = ~660s (11 min)",
+                ],
+                "images": [
+                    ("v2 Flat Render", "test_results_images/modular_dining_v2/registration_v2_flat_scene_render.png"),
+                ],
+            },
+        ],
+    },
+
+    # -------------------------------------------------------------------------
+    # 2026-02-21
+    # -------------------------------------------------------------------------
+    {
+        "date": "2026-02-21",
+        "author": "kingyy (gcp-L4/vscode/opus/hum)",
+        "entries": [
+            {
+                "type": "run",
+                "title": "SAM3D Batch Worker — 2x Speedup via Model Caching",
+                "source_md": "20260221_SAM3D_Batch_Worker_Results.md",
+                "summary": "Batch worker loads TRELLIS once, processes all objects sequentially. "
+                           "8 objects in 491s (8.2 min) vs baseline 1002s (16.7 min). Flash-attn only 2.4% faster.",
+                "input_img": "test_results_images/modular_dining_v2/target.jpg",
+                "output_img": "test_results_images/modular_dining_v2/registration_v2_scene_render.png",
+                "rounds": [],
+                "key_points": [
+                    "Batch mode: load TRELLIS once, process N objects — eliminates ~27s/object model reload",
+                    "491s (8.2 min) for 8 objects vs 1002s (16.7 min) baseline — 2x speedup",
+                    "Flash-attention only 2.4% faster (attention is ~24% of pipeline; decoder dominates)",
+                    "Zero OOM failures in batch mode vs 1 failure in baseline",
+                    "GPU reload fix: after post-opt offloads to CPU, reload_pipeline_to_gpu() (2.9s each)",
+                ],
+                "images": [],
+            },
+            {
+                "type": "analysis",
+                "title": "TRELLIS2 vs TRELLIS1 — Initial Comparison",
+                "source_md": "20260221_TRELLIS2_vs_TRELLIS1_Comparison.md",
+                "summary": "TRELLIS2 produces visually superior PBR meshes but 2.8x slower. "
+                           "IoU 0.22 (T2) vs 0.51 (T1) due to high-poly density mismatch in ICP.",
+                "key_points": [
+                    "TRELLIS2: 500K-2.4M vertices with PBR textures; TRELLIS1: 3K-13K vertices",
+                    "T2 2.8x slower: 1409s vs 491s (model load 169s, separate subprocess required)",
+                    "IoU 0.22 (T2) vs 0.51 (T1) — mesh density mismatch in ICP point sampling",
+                    "Both use identical layout_post_optimization; difference is in mesh quality/density",
+                    "Potential fix: decimate T2 meshes before ICP alignment",
+                ],
+                "images": [],
+            },
+        ],
+    },
+
+    # -------------------------------------------------------------------------
+    # 2026-02-19
+    # -------------------------------------------------------------------------
+    {
+        "date": "2026-02-19",
+        "author": "kingyy (win/vscode/opus/hum)",
+        "entries": [
+            {
+                "type": "run",
+                "title": "SAM3D Dining — ICP Pose Refinement + Overlay",
+                "source_md": "20260219_SAM3D_Dining_ICP_Overlay.md",
+                "summary": "ICP alignment on all 9 dining GLBs with v9 mask growth. "
+                           "4/9 objects accepted ICP improvement. Scene overlay rendered.",
+                "input_img": "test_results_images/sam3d_dining_icp/scene_photo_comparison.png",
+                "output_img": "test_results_images/sam3d_dining_icp/scene_2d_comparison.png",
+                "rounds": [],
+                "key_points": [
+                    "4/9 objects accepted ICP: chair_cushion, placemat, sofa (+0.3%), travel_pillow",
+                    "Well-aligned objects (newspaper 1.5%, placemat 0.5%) already optimal — no ICP improvement",
+                    "round_table/wooden_chair: high depth error from geometry (draping cloth, sparse frame), not pose",
+                    "Open3D point-to-point ICP (max_correspondence=0.3m) with depth-scale correction",
+                ],
+                "images": [
+                    ("Scene Depth", "test_results_images/sam3d_dining_icp/scene_depth_after.png"),
+                ],
+            },
+            {
+                "type": "run",
+                "title": "wooden_chair — ICP Pipeline Evolution (4 Runs)",
+                "source_md": "20260219_wooden_chair_ICP_pipeline_comparison.md",
+                "summary": "Four sequential runs: --scene-image no effect, coarse ICP (0.1m) achieves 3x improvement "
+                           "(0.09 → 0.26 IoU), Adam rejection bug fixed to preserve ICP gains.",
+                "input_img": "test_results_images/20260219_wooden_chair_icp/r2_glb_render.png",
+                "output_img": "test_results_images/20260219_wooden_chair_icp/r4_icp_preserve_proj.png",
+                "rounds": [],
+                "key_points": [
+                    "R1 baseline (0.17), R2 +scene-image (0.17) — same pose, MoGe not the limiting factor",
+                    "R3 two-pass ICP (0.1m→0.05m): coarse pass finds correspondences, IoU 0.27",
+                    "R4: preserve ICP on Adam fail → IoU 0.26, chair at correct location",
+                    "Ceiling ~0.27: TRELLIS initial pose tilted ~45°, Adam can't escape local minimum",
+                ],
+                "images": [
+                    ("3-Way Comparison", "test_results_images/20260219_wooden_chair_icp/comparison_3way.png"),
+                ],
+            },
+            {
+                "type": "analysis",
+                "title": "NaN Root Cause + Pipeline Step 5 Corrections",
+                "source_md": "20260219_NaN_Root_Cause_Experiment.md",
+                "summary": "Controlled experiment confirms scene-image fix working (sparse NaN vs all NaN). "
+                           "Pipeline corrections: mask growth before ICP, Adam always runs, depth filter clarified.",
+                "key_points": [
+                    "Per-object MoGe: all-NaN depth (4.7% mask coverage); scene MoGe: sparse-NaN (valid interior)",
+                    "grow_mask_v9 stalls with NaN: depth comparisons return False, blocking growth",
+                    "Correction: Stage 5a uses grown mask, not raw SAM mask",
+                    "Correction: Adam always runs regardless of ICP outcome",
+                    "wooden_chair: 4,685 SLAT voxels (sparse) vs 21,608 for keyboard — intrinsically hard",
+                ],
+                "images": [],
+            },
+        ],
+    },
+
+    # -------------------------------------------------------------------------
+    # 2026-02-18
+    # -------------------------------------------------------------------------
+    {
+        "date": "2026-02-18",
+        "author": "kingyy (win/vscode/opus/hum)",
+        "entries": [
+            {
+                "type": "analysis",
+                "title": "Mask Growth Algorithm Exploration (6 Variants)",
+                "source_md": "20260218_SAM3D_Dining_v9_RayCast_MaskGrowth.md",
+                "summary": "Systematic comparison of 6 mask growth algorithms on dining scene (v5-v9): "
+                           "normal-consistency, plane-distance, RANSAC, depth gates, ray-cast. "
+                           "Ray-cast (v9) best for convex objects, plane-distance best overall.",
+                "key_points": [
+                    "v5 Normal-Consistency: adaptive 15-60° threshold; flat objects conservative, curved objects hit cap",
+                    "v6 Plane-Distance (EDT): local reference fixes curved surfaces (chair_cushion +6→+6,436 px); best overall",
+                    "v7 RANSAC: 8-sector plane fit; over-conservative on flat surfaces (5mm floor collapses)",
+                    "v8 RANSAC v2: relaxed 3cm floor doubles pixels but still 50% below plane-distance",
+                    "v9 Ray-Cast: 8-direction first-hit depth; round_table +44K, sofa +12.7K — best for convex/filled objects",
+                    "Key insight: hull pixels surrounded by mask pixels in all directions → rays capture full local geometry",
+                ],
+                "images": [
+                    ("v5 Normal (round_table)", "test_results_images/sam3d_dining_v5/round_table_with_tablecloth_mask_growth.png"),
+                    ("v6 Plane-Dist (chair_cushion)", "test_results_images/sam3d_dining_plane_dist/chair_cushion_mask_growth.png"),
+                    ("v9 Ray-Cast (round_table)", "test_results_images/sam3d_dining_v9/round_table_with_tablecloth_mask_growth.png"),
+                    ("v9 Ray-Cast (chair_legs)", "test_results_images/sam3d_dining_v9/chair_legs_mask_growth.png"),
+                ],
+            },
+            {
+                "type": "analysis",
+                "title": "Convex Hull Results + Normal-Consistency on GreenTea",
+                "source_md": "20260218_SAM3D_ConvexHull_Results.md",
+                "summary": "Scene-image MoGe is a VIGA modification (not original SAM3D). "
+                           "Normal-consistency replaces Sobel for mask growth; handles shadows better, limited on curves.",
+                "key_points": [
+                    "Scene-image MoGe is our modification: original SAM3D runs MoGe on per-object masked RGBA",
+                    "Original design fails when objects <10% of image (masked image mostly black → MoGe NaN)",
+                    "Normal method correctly rejects shadow-contaminated regions (green_tea_bottle)",
+                    "Curved surface limitation: global mean reference breaks for cylinders (normal angle 0-90°)",
+                    "Per-pixel local reference approach suggested as future improvement",
+                ],
+                "images": [],
+            },
+        ],
+    },
+
+    # -------------------------------------------------------------------------
+    # 2026-02-17
+    # -------------------------------------------------------------------------
+    {
+        "date": "2026-02-17",
+        "author": "kingyy (win/vscode/opus/hum)",
+        "entries": [
+            {
+                "type": "run",
+                "title": "Convex Hull + Scene-Image MoGe — GreenTea Results",
+                "source_md": "20260217_SAM3D_ConvexHull_GreenTea_Results.md",
+                "summary": "Scene-image MoGe fix recovered 4/5 objects from all-NaN failure. "
+                           "IoU 0.45-0.95 (ito_en_bottle 0.95, envelope 0.86, headphones 0.83). "
+                           "Green_tea_bottle degenerated due to shadow contamination.",
+                "input_img": "test_results_images/greentea/target.png",
+                "output_img": "test_results_images/greentea/target.png",
+                "rounds": [],
+                "key_points": [
+                    "Scene-image MoGe bypasses NaN failures in per-object masked images (<30% visible pixels)",
+                    "4/5 objects: ito_en_bottle (0.95), envelope (0.86), headphones (0.83), keyboard (0.65)",
+                    "green_tea_bottle degenerated to flat disk — shadow contamination in SAM mask",
+                    "Convex hull mask growth stops at depth edges, gives TRELLIS more silhouette context",
+                    "~70-80 min end-to-end for 5 objects including Blender GIF rendering",
+                ],
+                "images": [],
+            },
+        ],
+    },
+
+    # -------------------------------------------------------------------------
+    # 2026-02-16
+    # -------------------------------------------------------------------------
+    {
+        "date": "2026-02-16",
+        "author": "kingyy (win/vscode/opus/hum)",
+        "entries": [
+            {
+                "type": "run",
+                "title": "SAM3D Dining v2/v3 — Post-Transform-Fix Full Run",
+                "source_md": "20260216_SAM3D_Dining_v2_Results.md",
+                "summary": "First 9-object dining run after Transform3d fix. Scale correction + Sobel mask growth. "
+                           "chair_legs depth error 55% → 5.3%. Added scene-level 2D comparison viz.",
+                "input_img": "test_results_images/sam3d_dining_v2/full_scene_comparison.png",
+                "output_img": "test_results_images/sam3d_dining_v3/scene_2d_comparison.png",
+                "rounds": [],
+                "key_points": [
+                    "3 transform fixes applied: translation row, pre-transform sign, dead post-transforms removed",
+                    "Depth alignment improved: chair_legs 55% → 5.3%, sofa 51% → 7.8%",
+                    "Best: placemat (0.6% error), newspaper (1.6%), chair_cushion (2.7%)",
+                    "v3: added scene-level 2D comparison — SAM masks (left) vs GLB projections (right)",
+                ],
+                "images": [
+                    ("v2 Scene Compare", "test_results_images/sam3d_dining_v2/full_scene_comparison.png"),
+                    ("v3 2D Compare", "test_results_images/sam3d_dining_v3/scene_2d_comparison.png"),
+                    ("Depth Dashboard", "test_results_images/sam3d_dining_v2/depth_diagnostic_dashboard.png"),
+                ],
+            },
+            {
+                "type": "analysis",
+                "title": "Depth Alignment Analysis + SAM3D Pipeline Documentation",
+                "source_md": "20260216_Depth_Alignment_Analysis.md",
+                "summary": "Diagnostic of depth alignment: layout optimizer prioritizes 2D silhouette, not depth. "
+                           "Documented full 6-step SAM3D pipeline with coordinate systems.",
+                "key_points": [
+                    "Test: per-vertex depth well-aligned for flat objects (1.4-5.3%) but severely misaligned for complex shapes (25-55%)",
+                    "Root cause: layout post-optimization (Stage 5c) optimizes only 2D silhouette IoU, no depth loss",
+                    "Recommended fix: add depth loss term to differentiable rendering in Stage 5c",
+                    "Pipeline documented: SAM → MoGe depth → TRELLIS 3D → pose decode → layout optimization → GLB export",
+                    "Critical: TRELLIS receives only RGBA image, NO MoGe depth; MoGe used only for pose/spatial anchoring",
+                ],
+                "images": [],
+            },
+        ],
+    },
+
+    # -------------------------------------------------------------------------
+    # 2026-02-15
+    # -------------------------------------------------------------------------
+    {
+        "date": "2026-02-15",
+        "author": "kingyy (win/vscode/opus/hum)",
+        "entries": [
+            {
+                "type": "run",
+                "title": "SAM3D Dining Scene — First Full Pipeline Run",
+                "source_md": "20260215_SAM3D_Dining_Scene_Results.md",
+                "summary": "End-to-end pipeline on dining scene: 9 objects segmented, reconstructed, and rendered. "
+                           "103 min total. 8/9 batch + 1 OOM rerun. ~89 MB GLBs.",
+                "input_img": "test_results_images/sam3d_dining_v2/full_scene_comparison.png",
+                "output_img": "test_results_images/sam3d_dining_v2/full_scene_comparison.png",
+                "rounds": [],
+                "key_points": [
+                    "Input: 771x1024 dining scene (resized from 3072x4080 to avoid SAM CUDA OOM)",
+                    "9 objects: chair, cushion, legs, table, sofa, pillow, newspaper, strainer, placemat",
+                    "8/9 batch completed; chair_legs OOM'd and required solo rerun (15 min, 12.5K sparse coords)",
+                    "MoGe depth 0.70-3.01m, camera intrinsics fx/fy=701.1px, cx=385.5, cy=512.0",
+                ],
+                "images": [],
+            },
+            {
+                "type": "analysis",
+                "title": "SAM3D Transform3d Alignment Fix",
+                "source_md": "20260215_SAM3D_Alignment_Fix.md",
+                "summary": "Fixed three critical bugs in Transform3d wrapper: translation in wrong row, "
+                           "negated pre-transform X-axis, dead post-transforms. 6/6 greentea objects now aligned.",
+                "key_points": [
+                    "Bug 1: Translation in column 3 (wrong) vs row 3 (correct) for PyTorch3D row-vector convention",
+                    "Bug 2: Pre-transform had negated X-axis, mirroring all meshes horizontally",
+                    "Bug 3: Three post-transforms canceled to identity — removed as dead code",
+                    "Per-object pixel accuracy 0.4-2.5% except large flat surfaces (desk 10.4%)",
+                    "Render axis fixes: vertical flip (Y-down→Y-up), horizontal flip (X-left vs X-right)",
+                ],
+                "images": [],
+            },
+            {
+                "type": "analysis",
+                "title": "SAM3D / TRELLIS Deep Dive Study",
+                "source_md": "20260215_SAM3D_TRELLIS_Study.md",
+                "summary": "Architecture study: SAM ViT-H → TRELLIS reconstruction. Bottleneck is dual decoder (50%). "
+                           "TRELLIS2 (4B params) promises ~3s/object on H100.",
+                "key_points": [
+                    "Pipeline: SAM segmentation → TRELLIS 3D (SS + SLAT + decoder)",
+                    "Bottleneck: dual decoder 50%, SLAT sampling 30%, model loading 5%",
+                    "TRELLIS2 (Dec 2025): 4B params, ~3s/object on H100 but consumer GPU VRAM unknown",
+                    "Optimization roadmap: reduce SLAT steps, cache model, parallelize objects",
+                ],
+                "images": [],
+            },
+        ],
+    },
+
+    # -------------------------------------------------------------------------
     # 2026-02-12
     # -------------------------------------------------------------------------
     {
