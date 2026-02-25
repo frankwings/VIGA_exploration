@@ -793,22 +793,22 @@ DATES = [
                     ("T2 vs Target", "test_results_images/trellis_comparison/t2_comparison_fixed.png"),
                 ],
                 "rounds": [
-                    ("SAM3D: neck_pillow (IoU 0.90)", "output/sam3d_dining_t1/rotation_gifs/neck_pillow_y_rotation.gif"),
-                    ("SAM3D: newspaper (IoU 0.84)", "output/sam3d_dining_t1/rotation_gifs/newspaper_y_rotation.gif"),
-                    ("SAM3D: broken_tile (IoU 0.72)", "output/sam3d_dining_t1/rotation_gifs/broken_tile_y_rotation.gif"),
-                    ("SAM3D: placemat (IoU 0.62)", "output/sam3d_dining_t1/rotation_gifs/placemat_y_rotation.gif"),
-                    ("SAM3D: table_with_tablecloth (IoU 0.48)", "output/sam3d_dining_t1/rotation_gifs/table_with_flower_tablecloth_y_rotation.gif"),
-                    ("SAM3D: sofa (IoU 0.25)", "output/sam3d_dining_t1/rotation_gifs/sofa_with_patterned_cover_y_rotation.gif"),
-                    ("SAM3D: colander (IoU 0.24)", "output/sam3d_dining_t1/rotation_gifs/metal_colander_y_rotation.gif"),
-                    ("SAM3D: chair (IoU 0.23)", "output/sam3d_dining_t1/rotation_gifs/wooden_chair_y_rotation.gif"),
-                    ("T2: pillow_and_blanket (IoU 0.58)", "output/sam3d_dining_t2/rotation_gifs/pillow_and_blanket_y_rotation.gif"),
-                    ("T2: sofa_cover (IoU 0.40)", "output/sam3d_dining_t2/rotation_gifs/sofa_cover_y_rotation.gif"),
-                    ("T2: chair (IoU 0.24)", "output/sam3d_dining_t2/rotation_gifs/chair_y_rotation.gif"),
-                    ("T2: tablecloth (IoU 0.20)", "output/sam3d_dining_t2/rotation_gifs/tablecloth_y_rotation.gif"),
-                    ("T2: newspaper (IoU 0.15)", "output/sam3d_dining_t2/rotation_gifs/newspaper_y_rotation.gif"),
-                    ("T2: chair_cover (IoU 0.10)", "output/sam3d_dining_t2/rotation_gifs/chair_cover_y_rotation.gif"),
-                    ("T2: plant (IoU 0.09)", "output/sam3d_dining_t2/rotation_gifs/plant_y_rotation.gif"),
-                    ("T2: pot_and_trivet (IoU 0.08)", "output/sam3d_dining_t2/rotation_gifs/pot_and_trivet_y_rotation.gif"),
+                    ("SAM3D: neck_pillow (IoU 0.90)", "../output/sam3d_dining_t1/rotation_gifs/neck_pillow_y_rotation.gif"),
+                    ("SAM3D: newspaper (IoU 0.84)", "../output/sam3d_dining_t1/rotation_gifs/newspaper_y_rotation.gif"),
+                    ("SAM3D: broken_tile (IoU 0.72)", "../output/sam3d_dining_t1/rotation_gifs/broken_tile_y_rotation.gif"),
+                    ("SAM3D: placemat (IoU 0.62)", "../output/sam3d_dining_t1/rotation_gifs/placemat_y_rotation.gif"),
+                    ("SAM3D: table_with_tablecloth (IoU 0.48)", "../output/sam3d_dining_t1/rotation_gifs/table_with_flower_tablecloth_y_rotation.gif"),
+                    ("SAM3D: sofa (IoU 0.25)", "../output/sam3d_dining_t1/rotation_gifs/sofa_with_patterned_cover_y_rotation.gif"),
+                    ("SAM3D: colander (IoU 0.24)", "../output/sam3d_dining_t1/rotation_gifs/metal_colander_y_rotation.gif"),
+                    ("SAM3D: chair (IoU 0.23)", "../output/sam3d_dining_t1/rotation_gifs/wooden_chair_y_rotation.gif"),
+                    ("T2: pillow_and_blanket (IoU 0.58)", "../output/sam3d_dining_t2/rotation_gifs/pillow_and_blanket_y_rotation.gif"),
+                    ("T2: sofa_cover (IoU 0.40)", "../output/sam3d_dining_t2/rotation_gifs/sofa_cover_y_rotation.gif"),
+                    ("T2: chair (IoU 0.24)", "../output/sam3d_dining_t2/rotation_gifs/chair_y_rotation.gif"),
+                    ("T2: tablecloth (IoU 0.20)", "../output/sam3d_dining_t2/rotation_gifs/tablecloth_y_rotation.gif"),
+                    ("T2: newspaper (IoU 0.15)", "../output/sam3d_dining_t2/rotation_gifs/newspaper_y_rotation.gif"),
+                    ("T2: chair_cover (IoU 0.10)", "../output/sam3d_dining_t2/rotation_gifs/chair_cover_y_rotation.gif"),
+                    ("T2: plant (IoU 0.09)", "../output/sam3d_dining_t2/rotation_gifs/plant_y_rotation.gif"),
+                    ("T2: pot_and_trivet (IoU 0.08)", "../output/sam3d_dining_t2/rotation_gifs/pot_and_trivet_y_rotation.gif"),
                 ],
             },
             {
@@ -2015,6 +2015,42 @@ def _build_pptx(date_groups, include_intro=True, subtitle=None):
     return prs
 
 
+def _safe_save(prs, out_path):
+    """Save PPTX, handling file locks by using temp file then moving."""
+    import tempfile
+    import shutil
+    import time
+
+    temp_path = Path(str(out_path) + ".tmp")
+    try:
+        # Save to temp file first
+        prs.save(str(temp_path))
+
+        # Try to replace original
+        out_path = Path(out_path)
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Try to remove old file
+                if out_path.exists():
+                    out_path.unlink()
+                # Move temp to final location
+                temp_path.rename(out_path)
+                return True
+            except PermissionError:
+                if attempt < max_retries - 1:
+                    time.sleep(1)  # Wait before retry
+                else:
+                    # Fallback: keep temp file
+                    print(f"  WARNING: Could not replace {out_path}, keeping {temp_path}")
+                    return False
+    except Exception as e:
+        print(f"  ERROR saving {out_path}: {e}")
+        if temp_path.exists():
+            temp_path.unlink()
+        return False
+
+
 def main():
     global COMPRESS
     COMPRESS = False
@@ -2024,14 +2060,14 @@ def main():
     # Part 1: Title + Flow + Env + first half of dates (newest) + closing
     part1_dates = DATES[:mid]
     prs1 = _build_pptx(part1_dates, include_intro=True)
-    prs1.save(str(OUT_PART1))
+    _safe_save(prs1, OUT_PART1)
     date_range1 = f"{part1_dates[-1]['date']} to {part1_dates[0]['date']}"
     print(f"Saved: {OUT_PART1} ({len(prs1.slides)} slides, {date_range1})")
 
     # Part 2: Title + second half of dates (oldest) + closing
     part2_dates = DATES[mid:]
     prs2 = _build_pptx(part2_dates, include_intro=False)
-    prs2.save(str(OUT_PART2))
+    _safe_save(prs2, OUT_PART2)
     date_range2 = f"{part2_dates[-1]['date']} to {part2_dates[0]['date']}"
     print(f"Saved: {OUT_PART2} ({len(prs2.slides)} slides, {date_range2})")
 
