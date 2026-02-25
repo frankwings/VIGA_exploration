@@ -687,7 +687,7 @@ def make_closing_slide(prs):
     add_text(s, Inches(1), Inches(2.0), Inches(11), Inches(1.2),
              "VIGA Project Summary", 48, ACCENT_BLUE, True, PP_ALIGN.CENTER)
     add_text(s, Inches(1), Inches(3.5), Inches(11), Inches(1),
-             "26 docs  |  27 days  |  SAM3D + Meshy + Blender + GPT-5",
+             "52 docs  |  27 days  |  SAM3D + Meshy + Blender + GPT-5",
              20, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
     add_text(s, Inches(1), Inches(4.5), Inches(11), Inches(0.5),
              "Yuna (win/claude/opus/clawdbot)  |  Arin (wsl/claude/opus/clawdbot)  |  kingyy (win/vscode/opus/hum)  |  Sohee (win/antigravity/gemini-pro-high/clawdbot)",
