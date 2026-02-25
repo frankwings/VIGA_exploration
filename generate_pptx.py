@@ -20,6 +20,7 @@ DOCS = Path("docs")
 OUT_PART1 = Path("docs/VIGA_Project_Summary_v5_part1.pptx")
 OUT_PART2 = Path("docs/VIGA_Project_Summary_v5_part2.pptx")
 OUT_SAM3D = Path("docs/VIGA_SAM3D_Feb15-24.pptx")
+OUT_FEB12_24 = Path("docs/VIGA_Summary_Feb12-24.pptx")
 
 # Max pixels per inch for embedded images (used only in compressed mode)
 EMBED_DPI = 150
@@ -2070,6 +2071,17 @@ def main():
     _safe_save(prs2, OUT_PART2)
     date_range2 = f"{part2_dates[-1]['date']} to {part2_dates[0]['date']}"
     print(f"Saved: {OUT_PART2} ({len(prs2.slides)} slides, {date_range2})")
+
+    # Feb 12-24 standalone deck: only 2026-02-12 to 2026-02-24
+    from datetime import datetime
+    start_date = datetime.strptime("2026-02-12", "%Y-%m-%d")
+    end_date = datetime.strptime("2026-02-24", "%Y-%m-%d")
+    feb_dates = [d for d in DATES if start_date <= datetime.strptime(d["date"], "%Y-%m-%d") <= end_date]
+    if feb_dates:
+        prs_feb = _build_pptx(feb_dates, include_intro=True)
+        _safe_save(prs_feb, OUT_FEB12_24)
+        date_range_feb = f"{feb_dates[-1]['date']} to {feb_dates[0]['date']}"
+        print(f"Saved: {OUT_FEB12_24} ({len(prs_feb.slides)} slides, {date_range_feb})")
 
     # SAM3D standalone deck: only Feb 15-24 dates (exclude pre-Feb-15 entries)
     # Note: Standalone SAM3D PPTX generation is skipped due to file locking on Windows.
