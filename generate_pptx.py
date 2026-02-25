@@ -682,13 +682,13 @@ def make_architecture_table_slide(prs, date_str, title):
             x += col_width
 
 
-def make_closing_slide(prs):
+def make_closing_slide(prs, num_docs=52, num_days=27, title="VIGA Project Summary"):
     s = prs.slides.add_slide(prs.slide_layouts[6])
     set_slide_bg(s, BG_DARK)
     add_text(s, Inches(1), Inches(2.0), Inches(11), Inches(1.2),
-             "VIGA Project Summary", 48, ACCENT_BLUE, True, PP_ALIGN.CENTER)
+             title, 48, ACCENT_BLUE, True, PP_ALIGN.CENTER)
     add_text(s, Inches(1), Inches(3.5), Inches(11), Inches(1),
-             "52 docs  |  27 days  |  SAM3D + Meshy + Blender + GPT-5",
+             f"{num_docs} docs  |  {num_days} days  |  SAM3D + Meshy + Blender + GPT-5",
              20, TEXT_SECONDARY, False, PP_ALIGN.CENTER)
     add_text(s, Inches(1), Inches(4.5), Inches(11), Inches(0.5),
              "Yuna (win/claude/opus/clawdbot)  |  Arin (wsl/claude/opus/clawdbot)  |  kingyy (win/vscode/opus/hum)  |  Sohee (win/antigravity/gemini-pro-high/clawdbot)",
@@ -1989,7 +1989,7 @@ DATES = [
 # Main
 # ============================================================================
 
-def _build_pptx(date_groups, include_intro=True, subtitle=None):
+def _build_pptx(date_groups, include_intro=True, subtitle=None, num_docs=None, num_days=None, closing_title=None):
     prs = Presentation()
     prs.slide_width = SLIDE_W
     prs.slide_height = SLIDE_H
@@ -2011,8 +2011,17 @@ def _build_pptx(date_groups, include_intro=True, subtitle=None):
             entry_author = entry.get("author", author)
             process_entry(prs, date_str, entry_author, entry)
 
-    # Closing
-    make_closing_slide(prs)
+    # Closing - use provided values or calculate defaults
+    if num_docs is None:
+        num_docs = sum(len(d["entries"]) for d in date_groups)
+    if num_days is None and date_groups:
+        from datetime import datetime
+        dates = [datetime.strptime(d["date"], "%Y-%m-%d") for d in date_groups]
+        num_days = (max(dates) - min(dates)).days + 1
+    if closing_title is None:
+        closing_title = "VIGA Project Summary"
+
+    make_closing_slide(prs, num_docs=num_docs, num_days=num_days, title=closing_title)
     return prs
 
 
@@ -2078,10 +2087,13 @@ def main():
     end_date = datetime.strptime("2026-02-24", "%Y-%m-%d")
     feb_dates = [d for d in DATES if start_date <= datetime.strptime(d["date"], "%Y-%m-%d") <= end_date]
     if feb_dates:
-        prs_feb = _build_pptx(feb_dates, include_intro=True)
+        # Count entries and calculate days for Feb 12-24 range
+        feb_num_docs = sum(len(d["entries"]) for d in feb_dates)
+        feb_num_days = (end_date - start_date).days + 1
+        prs_feb = _build_pptx(feb_dates, include_intro=True, num_docs=feb_num_docs, num_days=feb_num_days)
         _safe_save(prs_feb, OUT_FEB12_24)
         date_range_feb = f"{feb_dates[-1]['date']} to {feb_dates[0]['date']}"
-        print(f"Saved: {OUT_FEB12_24} ({len(prs_feb.slides)} slides, {date_range_feb})")
+        print(f"Saved: {OUT_FEB12_24} ({len(prs_feb.slides)} slides, {date_range_feb}, {feb_num_docs} docs, {feb_num_days} days)")
 
     # SAM3D standalone deck: only Feb 15-24 dates (exclude pre-Feb-15 entries)
     # Note: Standalone SAM3D PPTX generation is skipped due to file locking on Windows.
