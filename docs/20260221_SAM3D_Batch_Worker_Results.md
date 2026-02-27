@@ -66,7 +66,7 @@ The TRELLIS `layout_post_optimization` offloads models to CPU to free VRAM for P
 
 ### sofa_pattern (IoU=0.31)
 
-![sofa_pattern_compare](../output/sam3d_dining_batch/sofa_pattern_compare.png)
+![sofa_pattern_compare](sam3d_dining_batch/sofa_pattern_compare.png)
 
 - Shape: Large sofa with black/white pattern visible
 - Position: Background, correct placement
@@ -74,14 +74,14 @@ The TRELLIS `layout_post_optimization` offloads models to CPU to free VRAM for P
 
 ### tablecloth (IoU=0.48)
 
-![tablecloth_compare](../output/sam3d_dining_batch/tablecloth_compare.png)
+![tablecloth_compare](sam3d_dining_batch/tablecloth_compare.png)
 
 - Shape: Round table with cloth draping
 - Position: Center of scene
 
 ### save_the_date_tile (IoU=0.73)
 
-![save_the_date_tile_compare](../output/sam3d_dining_batch/save_the_date_tile_compare.png)
+![save_the_date_tile_compare](sam3d_dining_batch/save_the_date_tile_compare.png)
 
 - Shape: Flat tile/card object on chair
 - Position: Good alignment with input mask
@@ -89,7 +89,7 @@ The TRELLIS `layout_post_optimization` offloads models to CPU to free VRAM for P
 
 ### wooden_chair (IoU=0.23)
 
-![wooden_chair_compare](../output/sam3d_dining_batch/wooden_chair_compare.png)
+![wooden_chair_compare](sam3d_dining_batch/wooden_chair_compare.png)
 
 - Shape: Chair profile with back and seat
 - Position: Foreground center
@@ -97,7 +97,7 @@ The TRELLIS `layout_post_optimization` offloads models to CPU to free VRAM for P
 
 ### neck_pillow (IoU=0.92)
 
-![neck_pillow_compare](../output/sam3d_dining_batch/neck_pillow_compare.png)
+![neck_pillow_compare](sam3d_dining_batch/neck_pillow_compare.png)
 
 - Shape: Small pillow on sofa
 - Position: Excellent alignment
@@ -105,14 +105,14 @@ The TRELLIS `layout_post_optimization` offloads models to CPU to free VRAM for P
 
 ### newspaper (IoU=0.84)
 
-![newspaper_compare](../output/sam3d_dining_batch/newspaper_compare.png)
+![newspaper_compare](sam3d_dining_batch/newspaper_compare.png)
 
 - Shape: Flat rectangular object with text
 - Position: On table surface, good alignment
 
 ### metal_colander (IoU=0.24)
 
-![metal_colander_compare](../output/sam3d_dining_batch/metal_colander_compare.png)
+![metal_colander_compare](sam3d_dining_batch/metal_colander_compare.png)
 
 - Shape: Small round strainer/colander
 - Position: Left side of table
@@ -120,7 +120,7 @@ The TRELLIS `layout_post_optimization` offloads models to CPU to free VRAM for P
 
 ### place_mat (IoU=0.64)
 
-![place_mat_compare](../output/sam3d_dining_batch/place_mat_compare.png)
+![place_mat_compare](sam3d_dining_batch/place_mat_compare.png)
 
 - Shape: Flat rectangular shape
 - Position: On table, reasonable alignment
@@ -129,7 +129,7 @@ The TRELLIS `layout_post_optimization` offloads models to CPU to free VRAM for P
 
 ## 5. Full Scene Comparison
 
-![full_scene_comparison](../output/sam3d_dining_batch/full_scene_comparison.png)
+![full_scene_comparison](sam3d_dining_batch/full_scene_comparison.png)
 
 **Left:** Original target photograph
 **Right:** 3D render of all 8 reconstructed objects placed using MoGe camera + SAM3D transforms

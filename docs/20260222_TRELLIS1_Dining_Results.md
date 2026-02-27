@@ -21,49 +21,49 @@ SAM ViT-H detected **8 objects**. Each mask is shown as a red overlay on the ori
 
 ### All Masks Overview
 
-![All Masks Grid](../output/sam3d_dining_t1/viz/all_masks_grid.png)
+![All Masks Grid](sam3d_dining_t1/viz/all_masks_grid.png)
 
 ### Per-Object Masks
 
 #### sofa_with_patterned_cover
 | Mask Overlay | Binary Mask | Segmented Input |
 |:---:|:---:|:---:|
-| ![mask](../output/sam3d_dining_t1/viz/sofa_with_patterned_cover_mask.png) | ![binary](../output/sam3d_dining_t1/viz/sofa_with_patterned_cover_mask_binary.png) | ![seg](../output/sam3d_dining_t1/sofa_with_patterned_cover.png) |
+| ![mask](sam3d_dining_t1/viz/sofa_with_patterned_cover_mask.png) | ![binary](sam3d_dining_t1/viz/sofa_with_patterned_cover_mask_binary.png) | ![seg](sam3d_dining_t1/sofa_with_patterned_cover.png) |
 
 #### table_with_flower_tablecloth
 | Mask Overlay | Binary Mask | Segmented Input |
 |:---:|:---:|:---:|
-| ![mask](../output/sam3d_dining_t1/viz/table_with_flower_tablecloth_mask.png) | ![binary](../output/sam3d_dining_t1/viz/table_with_flower_tablecloth_mask_binary.png) | ![seg](../output/sam3d_dining_t1/table_with_flower_tablecloth.png) |
+| ![mask](sam3d_dining_t1/viz/table_with_flower_tablecloth_mask.png) | ![binary](sam3d_dining_t1/viz/table_with_flower_tablecloth_mask_binary.png) | ![seg](sam3d_dining_t1/table_with_flower_tablecloth.png) |
 
 #### broken_tile
 | Mask Overlay | Binary Mask | Segmented Input |
 |:---:|:---:|:---:|
-| ![mask](../output/sam3d_dining_t1/viz/broken_tile_mask.png) | ![binary](../output/sam3d_dining_t1/viz/broken_tile_mask_binary.png) | ![seg](../output/sam3d_dining_t1/broken_tile.png) |
+| ![mask](sam3d_dining_t1/viz/broken_tile_mask.png) | ![binary](sam3d_dining_t1/viz/broken_tile_mask_binary.png) | ![seg](sam3d_dining_t1/broken_tile.png) |
 
 #### wooden_chair
 | Mask Overlay | Binary Mask | Segmented Input |
 |:---:|:---:|:---:|
-| ![mask](../output/sam3d_dining_t1/viz/wooden_chair_mask.png) | ![binary](../output/sam3d_dining_t1/viz/wooden_chair_mask_binary.png) | ![seg](../output/sam3d_dining_t1/wooden_chair.png) |
+| ![mask](sam3d_dining_t1/viz/wooden_chair_mask.png) | ![binary](sam3d_dining_t1/viz/wooden_chair_mask_binary.png) | ![seg](sam3d_dining_t1/wooden_chair.png) |
 
 #### neck_pillow
 | Mask Overlay | Binary Mask | Segmented Input |
 |:---:|:---:|:---:|
-| ![mask](../output/sam3d_dining_t1/viz/neck_pillow_mask.png) | ![binary](../output/sam3d_dining_t1/viz/neck_pillow_mask_binary.png) | ![seg](../output/sam3d_dining_t1/neck_pillow.png) |
+| ![mask](sam3d_dining_t1/viz/neck_pillow_mask.png) | ![binary](sam3d_dining_t1/viz/neck_pillow_mask_binary.png) | ![seg](sam3d_dining_t1/neck_pillow.png) |
 
 #### newspaper
 | Mask Overlay | Binary Mask | Segmented Input |
 |:---:|:---:|:---:|
-| ![mask](../output/sam3d_dining_t1/viz/newspaper_mask.png) | ![binary](../output/sam3d_dining_t1/viz/newspaper_mask_binary.png) | ![seg](../output/sam3d_dining_t1/newspaper.png) |
+| ![mask](sam3d_dining_t1/viz/newspaper_mask.png) | ![binary](sam3d_dining_t1/viz/newspaper_mask_binary.png) | ![seg](sam3d_dining_t1/newspaper.png) |
 
 #### metal_colander
 | Mask Overlay | Binary Mask | Segmented Input |
 |:---:|:---:|:---:|
-| ![mask](../output/sam3d_dining_t1/viz/metal_colander_mask.png) | ![binary](../output/sam3d_dining_t1/viz/metal_colander_mask_binary.png) | ![seg](../output/sam3d_dining_t1/metal_colander.png) |
+| ![mask](sam3d_dining_t1/viz/metal_colander_mask.png) | ![binary](sam3d_dining_t1/viz/metal_colander_mask_binary.png) | ![seg](sam3d_dining_t1/metal_colander.png) |
 
 #### placemat
 | Mask Overlay | Binary Mask | Segmented Input |
 |:---:|:---:|:---:|
-| ![mask](../output/sam3d_dining_t1/viz/placemat_mask.png) | ![binary](../output/sam3d_dining_t1/viz/placemat_mask_binary.png) | ![seg](../output/sam3d_dining_t1/placemat.png) |
+| ![mask](sam3d_dining_t1/viz/placemat_mask.png) | ![binary](sam3d_dining_t1/viz/placemat_mask_binary.png) | ![seg](sam3d_dining_t1/placemat.png) |
 
 ---
 
@@ -73,14 +73,14 @@ Each object was reconstructed by TRELLIS1 into a GLB mesh, then rendered as a 36
 
 | Object | IoU | Y-Rotation (turntable) | X-Rotation (tumble) |
 |:---|:---:|:---:|:---:|
-| neck_pillow | **0.90** | ![y](../output/sam3d_dining_t1/rotation_gifs/neck_pillow_y_rotation.gif) | ![x](../output/sam3d_dining_t1/rotation_gifs/neck_pillow_x_rotation.gif) |
-| newspaper | **0.84** | ![y](../output/sam3d_dining_t1/rotation_gifs/newspaper_y_rotation.gif) | ![x](../output/sam3d_dining_t1/rotation_gifs/newspaper_x_rotation.gif) |
-| broken_tile | **0.72** | ![y](../output/sam3d_dining_t1/rotation_gifs/broken_tile_y_rotation.gif) | ![x](../output/sam3d_dining_t1/rotation_gifs/broken_tile_x_rotation.gif) |
-| placemat | **0.62** | ![y](../output/sam3d_dining_t1/rotation_gifs/placemat_y_rotation.gif) | ![x](../output/sam3d_dining_t1/rotation_gifs/placemat_x_rotation.gif) |
-| table_with_flower_tablecloth | **0.48** | ![y](../output/sam3d_dining_t1/rotation_gifs/table_with_flower_tablecloth_y_rotation.gif) | ![x](../output/sam3d_dining_t1/rotation_gifs/table_with_flower_tablecloth_x_rotation.gif) |
-| sofa_with_patterned_cover | **0.25** | ![y](../output/sam3d_dining_t1/rotation_gifs/sofa_with_patterned_cover_y_rotation.gif) | ![x](../output/sam3d_dining_t1/rotation_gifs/sofa_with_patterned_cover_x_rotation.gif) |
-| metal_colander | **0.24** | ![y](../output/sam3d_dining_t1/rotation_gifs/metal_colander_y_rotation.gif) | ![x](../output/sam3d_dining_t1/rotation_gifs/metal_colander_x_rotation.gif) |
-| wooden_chair | **0.23** | ![y](../output/sam3d_dining_t1/rotation_gifs/wooden_chair_y_rotation.gif) | ![x](../output/sam3d_dining_t1/rotation_gifs/wooden_chair_x_rotation.gif) |
+| neck_pillow | **0.90** | ![y](sam3d_dining_t1/rotation_gifs/neck_pillow_y_rotation.gif) | ![x](sam3d_dining_t1/rotation_gifs/neck_pillow_x_rotation.gif) |
+| newspaper | **0.84** | ![y](sam3d_dining_t1/rotation_gifs/newspaper_y_rotation.gif) | ![x](sam3d_dining_t1/rotation_gifs/newspaper_x_rotation.gif) |
+| broken_tile | **0.72** | ![y](sam3d_dining_t1/rotation_gifs/broken_tile_y_rotation.gif) | ![x](sam3d_dining_t1/rotation_gifs/broken_tile_x_rotation.gif) |
+| placemat | **0.62** | ![y](sam3d_dining_t1/rotation_gifs/placemat_y_rotation.gif) | ![x](sam3d_dining_t1/rotation_gifs/placemat_x_rotation.gif) |
+| table_with_flower_tablecloth | **0.48** | ![y](sam3d_dining_t1/rotation_gifs/table_with_flower_tablecloth_y_rotation.gif) | ![x](sam3d_dining_t1/rotation_gifs/table_with_flower_tablecloth_x_rotation.gif) |
+| sofa_with_patterned_cover | **0.25** | ![y](sam3d_dining_t1/rotation_gifs/sofa_with_patterned_cover_y_rotation.gif) | ![x](sam3d_dining_t1/rotation_gifs/sofa_with_patterned_cover_x_rotation.gif) |
+| metal_colander | **0.24** | ![y](sam3d_dining_t1/rotation_gifs/metal_colander_y_rotation.gif) | ![x](sam3d_dining_t1/rotation_gifs/metal_colander_x_rotation.gif) |
+| wooden_chair | **0.23** | ![y](sam3d_dining_t1/rotation_gifs/wooden_chair_y_rotation.gif) | ![x](sam3d_dining_t1/rotation_gifs/wooden_chair_x_rotation.gif) |
 
 ---
 
@@ -90,13 +90,13 @@ All 8 reconstructed objects placed in a Blender scene using MoGe camera intrinsi
 
 ### Full Scene Comparison
 
-![Full Scene Comparison](../output/sam3d_dining_t1/full_scene_comparison.png)
+![Full Scene Comparison](sam3d_dining_t1/full_scene_comparison.png)
 
 **Left:** Original target photograph | **Right:** TRELLIS1 3D render with MoGe camera alignment
 
 ### 3D Render Only
 
-![Full Scene Render](../output/sam3d_dining_t1/full_scene_render.png)
+![Full Scene Render](sam3d_dining_t1/full_scene_render.png)
 
 ---
 

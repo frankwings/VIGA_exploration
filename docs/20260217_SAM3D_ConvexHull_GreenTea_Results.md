@@ -85,7 +85,7 @@ All transforms in PyTorch3D camera space (X-left, Y-up, Z-forward). Stored in `*
 
 ### Scene Overview
 
-![scene_2d_comparison](../output/sam3d_convex_hull_v2/vis/scene_2d_comparison.png)
+![scene_2d_comparison](sam3d_convex_hull_v2/vis/scene_2d_comparison.png)
 
 *Left: 2D SAM masks overlaid on depth map. Right: 3D GLB projections overlaid on depth map. All 5 objects shown in distinct colors.*
 
@@ -93,7 +93,7 @@ All transforms in PyTorch3D camera space (X-left, Y-up, Z-forward). Stored in `*
 
 ### ito_en_bottle (IoU = 0.9486)
 
-![ito_en_bottle_compare](../output/sam3d_convex_hull_v2/vis/ito_en_bottle_compare.png)
+![ito_en_bottle_compare](sam3d_convex_hull_v2/vis/ito_en_bottle_compare.png)
 
 - **Shape:** Clean bottle silhouette — TRELLIS correctly reconstructed the cylindrical body
 - **Position:** Foreground center, Z = 1.128 m
@@ -101,17 +101,17 @@ All transforms in PyTorch3D camera space (X-left, Y-up, Z-forward). Stored in `*
 
 **Convex hull mask growth** (171,297px → +7,585px added at shoulder gaps, threshold=0.392):
 
-![ito_en_bottle_mask_growth](../output/sam3d_convex_hull_v2/vis/ito_en_bottle_mask_growth.png)
+![ito_en_bottle_mask_growth](sam3d_convex_hull_v2/vis/ito_en_bottle_mask_growth.png)
 
 **Rotation GIF (Y-axis):**
 
-![ito_en_bottle_gif](../output/sam3d_convex_hull_v2/gifs/ito_en_bottle.gif)
+![ito_en_bottle_gif](sam3d_convex_hull_v2/gifs/ito_en_bottle.gif)
 
 ---
 
 ### envelope (IoU = 0.8576)
 
-![envelope_compare](../output/sam3d_convex_hull_v2/vis/envelope_compare.png)
+![envelope_compare](sam3d_convex_hull_v2/vis/envelope_compare.png)
 
 - **Shape:** Flat rectangular form — correct for a paper envelope lying flat
 - **Position:** Top-left of depth map, Z = 2.398 m (furthest object)
@@ -119,17 +119,17 @@ All transforms in PyTorch3D camera space (X-left, Y-up, Z-forward). Stored in `*
 
 **Convex hull mask growth** (19,971px → +1,059px added at corners, threshold=0.498):
 
-![envelope_mask_growth](../output/sam3d_convex_hull_v2/vis/envelope_mask_growth.png)
+![envelope_mask_growth](sam3d_convex_hull_v2/vis/envelope_mask_growth.png)
 
 **Rotation GIF (Y-axis):**
 
-![envelope_gif](../output/sam3d_convex_hull_v2/gifs/envelope.gif)
+![envelope_gif](sam3d_convex_hull_v2/gifs/envelope.gif)
 
 ---
 
 ### headphones (IoU = 0.8256)
 
-![headphones_compare](../output/sam3d_convex_hull_v2/vis/headphones_compare.png)
+![headphones_compare](sam3d_convex_hull_v2/vis/headphones_compare.png)
 
 - **Shape:** Small capsule/disc — correct compact shape for over-ear headphones
 - **Position:** Top-right of depth map, Z = 2.341 m
@@ -137,17 +137,17 @@ All transforms in PyTorch3D camera space (X-left, Y-up, Z-forward). Stored in `*
 
 **Convex hull mask growth** (11,950px → +74px, threshold=0.064 — mask already nearly convex):
 
-![headphones_mask_growth](../output/sam3d_convex_hull_v2/vis/headphones_mask_growth.png)
+![headphones_mask_growth](sam3d_convex_hull_v2/vis/headphones_mask_growth.png)
 
 **Rotation GIF (Y-axis):**
 
-![headphones_gif](../output/sam3d_convex_hull_v2/gifs/headphones.gif)
+![headphones_gif](sam3d_convex_hull_v2/gifs/headphones.gif)
 
 ---
 
 ### alienware_keyboard (IoU = 0.6466)
 
-![alienware_keyboard_compare](../output/sam3d_convex_hull_v2/vis/alienware_keyboard_compare.png)
+![alienware_keyboard_compare](sam3d_convex_hull_v2/vis/alienware_keyboard_compare.png)
 
 - **Shape:** Wide flat rectangular plate — correct keyboard geometry
 - **Position:** Right-center of scene, Z = 1.939 m
@@ -155,17 +155,17 @@ All transforms in PyTorch3D camera space (X-left, Y-up, Z-forward). Stored in `*
 
 **Convex hull mask growth** (78,243px → +1,154px filling left-edge gap, threshold=0.063):
 
-![alienware_keyboard_mask_growth](../output/sam3d_convex_hull_v2/vis/alienware_keyboard_mask_growth.png)
+![alienware_keyboard_mask_growth](sam3d_convex_hull_v2/vis/alienware_keyboard_mask_growth.png)
 
 **Rotation GIF (Y-axis):**
 
-![alienware_keyboard_gif](../output/sam3d_convex_hull_v2/gifs/alienware_keyboard.gif)
+![alienware_keyboard_gif](sam3d_convex_hull_v2/gifs/alienware_keyboard.gif)
 
 ---
 
 ### green_tea_bottle (IoU = 0.4545)
 
-![green_tea_bottle_compare](../output/sam3d_convex_hull_v2/vis/green_tea_bottle_compare.png)
+![green_tea_bottle_compare](sam3d_convex_hull_v2/vis/green_tea_bottle_compare.png)
 
 - **Shape:** Degenerate flat disk — TRELLIS reconstructed the shadow/table area rather than the bottle body
 - **Position:** Center-left foreground, Z = 1.383 m
@@ -173,19 +173,19 @@ All transforms in PyTorch3D camera space (X-left, Y-up, Z-forward). Stored in `*
 
 **Convex hull mask growth** (276,302px → +5,903px, threshold=0.012 — very low, near-uniform depth across mask):
 
-![green_tea_bottle_mask_growth](../output/sam3d_convex_hull_v2/vis/green_tea_bottle_mask_growth.png)
+![green_tea_bottle_mask_growth](sam3d_convex_hull_v2/vis/green_tea_bottle_mask_growth.png)
 
 *The mask growth visualization reveals the root cause: the SAM mask (35% of scene, 276K px) already covers the large flat table/shadow region. The convex hull is even larger (332K px), and the depth gradient threshold is extremely low (0.012) because the shadow area has near-uniform depth — almost no edges inside the mask. This tells TRELLIS to reconstruct a large flat surface, not a bottle.*
 
 **Rotation GIF (Y-axis):**
 
-![green_tea_bottle_gif](../output/sam3d_convex_hull_v2/gifs/green_tea_bottle.gif)
+![green_tea_bottle_gif](sam3d_convex_hull_v2/gifs/green_tea_bottle.gif)
 
 ---
 
 ## 6. Scene Comparison
 
-![scene_overlay_depth](../output/sam3d_convex_hull_v2/vis/scene_overlay_depth.png)
+![scene_overlay_depth](sam3d_convex_hull_v2/vis/scene_overlay_depth.png)
 
 *All 5 reconstructed GLB point projections overlaid on the grayscale MoGe depth map. Colors match the per-object legend. The overall spatial layout is consistent with the original photograph.*
 

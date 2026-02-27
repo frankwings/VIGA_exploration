@@ -39,27 +39,27 @@
 
 | # | Object | IoU | GLB Size | Rotation GIF |
 |:---:|:---|:---:|:---:|:---:|
-| 1 | pillow_and_blanket | **0.58** | 57.6 MB | ![y](../output/sam3d_dining_t2/rotation_gifs/pillow_and_blanket_y_rotation.gif) |
-| 2 | sofa_cover | **0.40** | 81.2 MB | ![y](../output/sam3d_dining_t2/rotation_gifs/sofa_cover_y_rotation.gif) |
-| 3 | chair | **0.24** | 27.7 MB | ![y](../output/sam3d_dining_t2/rotation_gifs/chair_y_rotation.gif) |
-| 4 | tablecloth | **0.20** | 24.0 MB | ![y](../output/sam3d_dining_t2/rotation_gifs/tablecloth_y_rotation.gif) |
-| 5 | newspaper | **0.15** | 19.4 MB | ![y](../output/sam3d_dining_t2/rotation_gifs/newspaper_y_rotation.gif) |
-| 6 | chair_cover | **0.10** | 40.2 MB | ![y](../output/sam3d_dining_t2/rotation_gifs/chair_cover_y_rotation.gif) |
-| 7 | plant | **0.09** | 42.4 MB | ![y](../output/sam3d_dining_t2/rotation_gifs/plant_y_rotation.gif) |
-| 8 | pot_and_trivet | **0.08** | 18.4 MB | ![y](../output/sam3d_dining_t2/rotation_gifs/pot_and_trivet_y_rotation.gif) |
+| 1 | pillow_and_blanket | **0.58** | 57.6 MB | ![y](sam3d_dining_t2/rotation_gifs/pillow_and_blanket_y_rotation.gif) |
+| 2 | sofa_cover | **0.40** | 81.2 MB | ![y](sam3d_dining_t2/rotation_gifs/sofa_cover_y_rotation.gif) |
+| 3 | chair | **0.24** | 27.7 MB | ![y](sam3d_dining_t2/rotation_gifs/chair_y_rotation.gif) |
+| 4 | tablecloth | **0.20** | 24.0 MB | ![y](sam3d_dining_t2/rotation_gifs/tablecloth_y_rotation.gif) |
+| 5 | newspaper | **0.15** | 19.4 MB | ![y](sam3d_dining_t2/rotation_gifs/newspaper_y_rotation.gif) |
+| 6 | chair_cover | **0.10** | 40.2 MB | ![y](sam3d_dining_t2/rotation_gifs/chair_cover_y_rotation.gif) |
+| 7 | plant | **0.09** | 42.4 MB | ![y](sam3d_dining_t2/rotation_gifs/plant_y_rotation.gif) |
+| 8 | pot_and_trivet | **0.08** | 18.4 MB | ![y](sam3d_dining_t2/rotation_gifs/pot_and_trivet_y_rotation.gif) |
 
 ### SAM3D Objects (sorted by IoU)
 
 | # | Object | IoU | GLB Size | Y-Rotation | X-Rotation |
 |:---:|:---|:---:|:---:|:---:|:---:|
-| 1 | neck_pillow | **0.90** | 1.2 MB | ![y](../output/sam3d_dining_t1/rotation_gifs/neck_pillow_y_rotation.gif) | ![x](../output/sam3d_dining_t1/rotation_gifs/neck_pillow_x_rotation.gif) |
-| 2 | newspaper | **0.84** | 1.4 MB | ![y](../output/sam3d_dining_t1/rotation_gifs/newspaper_y_rotation.gif) | ![x](../output/sam3d_dining_t1/rotation_gifs/newspaper_x_rotation.gif) |
-| 3 | broken_tile | **0.72** | 1.4 MB | ![y](../output/sam3d_dining_t1/rotation_gifs/broken_tile_y_rotation.gif) | ![x](../output/sam3d_dining_t1/rotation_gifs/broken_tile_x_rotation.gif) |
-| 4 | placemat | **0.62** | 1.4 MB | ![y](../output/sam3d_dining_t1/rotation_gifs/placemat_y_rotation.gif) | ![x](../output/sam3d_dining_t1/rotation_gifs/placemat_x_rotation.gif) |
-| 5 | table_with_flower_tablecloth | **0.48** | 1.6 MB | ![y](../output/sam3d_dining_t1/rotation_gifs/table_with_flower_tablecloth_y_rotation.gif) | ![x](../output/sam3d_dining_t1/rotation_gifs/table_with_flower_tablecloth_x_rotation.gif) |
-| 6 | sofa_with_patterned_cover | **0.25** | 1.7 MB | ![y](../output/sam3d_dining_t1/rotation_gifs/sofa_with_patterned_cover_y_rotation.gif) | ![x](../output/sam3d_dining_t1/rotation_gifs/sofa_with_patterned_cover_x_rotation.gif) |
-| 7 | metal_colander | **0.24** | 1.2 MB | ![y](../output/sam3d_dining_t1/rotation_gifs/metal_colander_y_rotation.gif) | ![x](../output/sam3d_dining_t1/rotation_gifs/metal_colander_x_rotation.gif) |
-| 8 | wooden_chair | **0.23** | 1.2 MB | ![y](../output/sam3d_dining_t1/rotation_gifs/wooden_chair_y_rotation.gif) | ![x](../output/sam3d_dining_t1/rotation_gifs/wooden_chair_x_rotation.gif) |
+| 1 | neck_pillow | **0.90** | 1.2 MB | ![y](sam3d_dining_t1/rotation_gifs/neck_pillow_y_rotation.gif) | ![x](sam3d_dining_t1/rotation_gifs/neck_pillow_x_rotation.gif) |
+| 2 | newspaper | **0.84** | 1.4 MB | ![y](sam3d_dining_t1/rotation_gifs/newspaper_y_rotation.gif) | ![x](sam3d_dining_t1/rotation_gifs/newspaper_x_rotation.gif) |
+| 3 | broken_tile | **0.72** | 1.4 MB | ![y](sam3d_dining_t1/rotation_gifs/broken_tile_y_rotation.gif) | ![x](sam3d_dining_t1/rotation_gifs/broken_tile_x_rotation.gif) |
+| 4 | placemat | **0.62** | 1.4 MB | ![y](sam3d_dining_t1/rotation_gifs/placemat_y_rotation.gif) | ![x](sam3d_dining_t1/rotation_gifs/placemat_x_rotation.gif) |
+| 5 | table_with_flower_tablecloth | **0.48** | 1.6 MB | ![y](sam3d_dining_t1/rotation_gifs/table_with_flower_tablecloth_y_rotation.gif) | ![x](sam3d_dining_t1/rotation_gifs/table_with_flower_tablecloth_x_rotation.gif) |
+| 6 | sofa_with_patterned_cover | **0.25** | 1.7 MB | ![y](sam3d_dining_t1/rotation_gifs/sofa_with_patterned_cover_y_rotation.gif) | ![x](sam3d_dining_t1/rotation_gifs/sofa_with_patterned_cover_x_rotation.gif) |
+| 7 | metal_colander | **0.24** | 1.2 MB | ![y](sam3d_dining_t1/rotation_gifs/metal_colander_y_rotation.gif) | ![x](sam3d_dining_t1/rotation_gifs/metal_colander_x_rotation.gif) |
+| 8 | wooden_chair | **0.23** | 1.2 MB | ![y](sam3d_dining_t1/rotation_gifs/wooden_chair_y_rotation.gif) | ![x](sam3d_dining_t1/rotation_gifs/wooden_chair_x_rotation.gif) |
 
 ### Comparable Object Pairs
 
@@ -80,11 +80,11 @@ Where the same physical object was segmented by both runs, direct comparison:
 
 ### TRELLIS2 Mask Grid
 
-![TRELLIS2 Masks](../output/sam3d_dining_t2/viz/mask_grid.png)
+![TRELLIS2 Masks](sam3d_dining_t2/viz/mask_grid.png)
 
 ### SAM3D Mask Grid
 
-![SAM3D Masks](../output/sam3d_dining_t1/viz/all_masks_grid.png)
+![SAM3D Masks](sam3d_dining_t1/viz/all_masks_grid.png)
 
 **Note:** Different SAM runs produced different object decompositions. TRELLIS2 segmented: sofa_cover, tablecloth, chair_cover, chair, pillow_and_blanket, newspaper, pot_and_trivet, plant. SAM3D segmented: sofa_with_patterned_cover, table_with_flower_tablecloth, broken_tile, wooden_chair, neck_pillow, newspaper, metal_colander, placemat.
 
@@ -94,19 +94,19 @@ Where the same physical object was segmented by both runs, direct comparison:
 
 ### TRELLIS2 Scene Render
 
-![T2 Comparison](../output/sam3d_dining_t2/viz_1024/comparison_fixed.png)
+![T2 Comparison](sam3d_dining_t2/viz_1024/comparison_fixed.png)
 
 **Left:** Original target (mirrored for camera match) | **Right:** TRELLIS2 3D render
 
 ### TRELLIS2 Scene Overlay
 
-![T2 Triptych](../output/sam3d_dining_t2/viz_1024/triptych_fixed.png)
+![T2 Triptych](sam3d_dining_t2/viz_1024/triptych_fixed.png)
 
 **Left:** Target | **Center:** 50% overlay blend | **Right:** 3D render only
 
 ### SAM3D Scene Render
 
-![T1 Comparison](../output/sam3d_dining_t1/full_scene_comparison.png)
+![T1 Comparison](sam3d_dining_t1/full_scene_comparison.png)
 
 **Left:** Original target | **Right:** SAM3D 3D render with MoGe camera alignment
 

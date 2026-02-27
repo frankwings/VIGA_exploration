@@ -56,7 +56,7 @@ Image: 771 x 1024 px
 
 ### Depth Map
 
-![moge_depth_visualization](../output/sam3d_dining/moge_depth_visualization.png)
+![moge_depth_visualization](sam3d_dining/moge_depth_visualization.png)
 
 *Left: Original image | Center: Depth colormap (warm = near, cool = far) | Right: Inverse depth*
 
@@ -139,21 +139,21 @@ Nearest to farthest:
 
 ### wooden_chair
 
-![wooden_chair_compare](../output/sam3d_dining/wooden_chair_compare.png)
+![wooden_chair_compare](sam3d_dining/wooden_chair_compare.png)
 
 - Shape: Good chair profile with back and seat visible
 - Position: Foreground center, matches 2D input
 
 ### chair_cushion
 
-![chair_cushion_compare](../output/sam3d_dining/chair_cushion_compare.png)
+![chair_cushion_compare](sam3d_dining/chair_cushion_compare.png)
 
 - Shape: Recognizable cushion with floral pattern
 - Position: On the chair seat area
 
 ### chair_legs (solo rerun)
 
-![chair_legs_compare](../output/sam3d_dining/chair_legs_compare.png)
+![chair_legs_compare](sam3d_dining/chair_legs_compare.png)
 
 - Shape: Large flat surface (floor + chair leg area)
 - Position: Lower portion of frame
@@ -161,42 +161,42 @@ Nearest to farthest:
 
 ### round_table_with_tablecloth
 
-![round_table_with_tablecloth_compare](../output/sam3d_dining/round_table_with_tablecloth_compare.png)
+![round_table_with_tablecloth_compare](sam3d_dining/round_table_with_tablecloth_compare.png)
 
 - Shape: Round table with cloth draping
 - Position: Center of scene
 
 ### sofa_with_patterned_cover
 
-![sofa_with_patterned_cover_compare](../output/sam3d_dining/sofa_with_patterned_cover_compare.png)
+![sofa_with_patterned_cover_compare](sam3d_dining/sofa_with_patterned_cover_compare.png)
 
 - Shape: Large sofa with visible black/white pattern
 - Position: Background, matches 2D input
 
 ### travel_pillow
 
-![travel_pillow_compare](../output/sam3d_dining/travel_pillow_compare.png)
+![travel_pillow_compare](sam3d_dining/travel_pillow_compare.png)
 
 - Shape: Small pillow shape
 - Position: Upper area (on sofa)
 
 ### newspaper
 
-![newspaper_compare](../output/sam3d_dining/newspaper_compare.png)
+![newspaper_compare](sam3d_dining/newspaper_compare.png)
 
 - Shape: Flat object with text visible
 - Position: On table surface
 
 ### strainer
 
-![strainer_compare](../output/sam3d_dining/strainer_compare.png)
+![strainer_compare](sam3d_dining/strainer_compare.png)
 
 - Shape: Small round object
 - Position: Left side of table area
 
 ### placemat
 
-![placemat_compare](../output/sam3d_dining/placemat_compare.png)
+![placemat_compare](sam3d_dining/placemat_compare.png)
 
 - Shape: Flat rectangular shape
 - Position: On table
@@ -205,7 +205,7 @@ Nearest to farthest:
 
 ## 7. Full Scene Comparison
 
-![full_scene_comparison_9obj](../output/sam3d_dining/full_scene_comparison_9obj.png)
+![full_scene_comparison_9obj](sam3d_dining/full_scene_comparison_9obj.png)
 
 **Left:** Original target photograph
 **Right:** 3D render of all 9 reconstructed objects placed using MoGe camera + SAM3D transforms

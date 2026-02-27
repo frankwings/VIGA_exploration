@@ -100,13 +100,13 @@ The pre-fix renders below are from `output/aligned_test/`, produced during debug
 
 ### Full Scene — Initial Broken Result
 
-![before_after_auto](../output/sam3d_rerun_fixed/before_after_auto_vs_fixed.png)
+![before_after_auto](sam3d_rerun_fixed/before_after_auto_vs_fixed.png)
 
 *Left: Target photograph. Center: Pre-fix render — objects clustered, bottle sideways, headphones tiny, no spatial correspondence. Right: Post-fix render — 6 objects correctly placed matching the photograph.*
 
 ### Full Scene — Best Pre-Fix Attempt
 
-![before_after_final](../output/sam3d_rerun_fixed/before_after_final_vs_fixed.png)
+![before_after_final](sam3d_rerun_fixed/before_after_final_vs_fixed.png)
 
 *Even after manual debugging attempts, the pre-fix scene remained upside-down with objects floating in wrong positions.*
 
@@ -116,10 +116,10 @@ Multiple attempts were made to fix the alignment before the root cause was found
 
 | Render | Description |
 |---|---|
-| ![greentea_auto](../output/aligned_test/greentea_auto.png) | `greentea_auto.png` — First automatic render. Objects clustered, bottle sideways, headphones a tiny ring in upper right. |
-| ![greentea_final](../output/aligned_test/greentea_final.png) | `greentea_final.png` — After camera adjustments. Scene is upside-down, objects still floating. |
-| ![greentea_fixed_v2](../output/aligned_test/greentea_fixed_v2.png) | `greentea_fixed_v2.png` — Attempted transform corrections. Layout slightly better but still wrong. |
-| ![greentea_fixed_v3](../output/aligned_test/greentea_fixed_v3.png) | `greentea_fixed_v3.png` — More corrections. Objects still mispositioned and scene flipped. |
+| ![greentea_auto](aligned_test/greentea_auto.png) | `greentea_auto.png` — First automatic render. Objects clustered, bottle sideways, headphones a tiny ring in upper right. |
+| ![greentea_final](aligned_test/greentea_final.png) | `greentea_final.png` — After camera adjustments. Scene is upside-down, objects still floating. |
+| ![greentea_fixed_v2](aligned_test/greentea_fixed_v2.png) | `greentea_fixed_v2.png` — Attempted transform corrections. Layout slightly better but still wrong. |
+| ![greentea_fixed_v3](aligned_test/greentea_fixed_v3.png) | `greentea_fixed_v3.png` — More corrections. Objects still mispositioned and scene flipped. |
 
 ### Multi-View Diagnostic
 
@@ -257,7 +257,7 @@ Note: Translations are in PyTorch3D camera space (X-left, Y-up, Z-forward). The 
 
 ### green_tea_bottle_1 (Ito En Bottle) — Best Result
 
-![green_tea_bottle_1_compare](../output/sam3d_rerun_fixed/green_tea_bottle_1_compare.png)
+![green_tea_bottle_1_compare](sam3d_rerun_fixed/green_tea_bottle_1_compare.png)
 
 - Shape: Excellent — recognizable bottle with cap, label, body
 - Position: Centered, matches 2D input
@@ -265,7 +265,7 @@ Note: Translations are in PyTorch3D camera space (X-left, Y-up, Z-forward). The 
 
 ### alienware_keyboard (Right Half)
 
-![alienware_keyboard_compare](../output/sam3d_rerun_fixed/alienware_keyboard_compare.png)
+![alienware_keyboard_compare](sam3d_rerun_fixed/alienware_keyboard_compare.png)
 
 - Shape: Good keyboard section with visible keys
 - Position: Right side of frame, matches 2D input
@@ -273,7 +273,7 @@ Note: Translations are in PyTorch3D camera space (X-left, Y-up, Z-forward). The 
 
 ### alienware_keyboard_1 (Left Half)
 
-![alienware_keyboard_1_compare](../output/sam3d_rerun_fixed/alienware_keyboard_1_compare.png)
+![alienware_keyboard_1_compare](sam3d_rerun_fixed/alienware_keyboard_1_compare.png)
 
 - Shape: Good keyboard section
 - Position: Left side of frame, matches 2D input
@@ -281,7 +281,7 @@ Note: Translations are in PyTorch3D camera space (X-left, Y-up, Z-forward). The 
 
 ### envelope
 
-![envelope_compare](../output/sam3d_rerun_fixed/envelope_compare.png)
+![envelope_compare](sam3d_rerun_fixed/envelope_compare.png)
 
 - Shape: Good flat shape with correct tilt angle
 - Position: Upper-left area, matches 2D input
@@ -289,7 +289,7 @@ Note: Translations are in PyTorch3D camera space (X-left, Y-up, Z-forward). The 
 
 ### green_tea_bottle (Desk Surface)
 
-![green_tea_bottle_compare](../output/sam3d_rerun_fixed/green_tea_bottle_compare.png)
+![green_tea_bottle_compare](sam3d_rerun_fixed/green_tea_bottle_compare.png)
 
 - Shape: Large flat surface (desk segment)
 - Position: Bottom area, matches 2D input
@@ -297,7 +297,7 @@ Note: Translations are in PyTorch3D camera space (X-left, Y-up, Z-forward). The 
 
 ### headphones
 
-![headphones_compare](../output/sam3d_rerun_fixed/headphones_compare.png)
+![headphones_compare](sam3d_rerun_fixed/headphones_compare.png)
 
 - Shape: Recognizable ear cup pair — teal/green color matches input
 - Position: Upper-right area, matches 2D input
@@ -307,7 +307,7 @@ Note: Translations are in PyTorch3D camera space (X-left, Y-up, Z-forward). The 
 
 ## 8. Full Scene Comparison
 
-![full_scene_comparison](../output/sam3d_rerun_fixed/full_scene_comparison_6obj.png)
+![full_scene_comparison](sam3d_rerun_fixed/full_scene_comparison_6obj.png)
 
 **Left:** Original target photograph
 **Right:** 3D render of all 6 reconstructed objects placed using MoGe camera + SAM3D transforms
@@ -365,7 +365,7 @@ To quantify remaining alignment errors, we measured the bounding-box center offs
 
 ### Overlay Diagnostic
 
-![overlay_diagnostic](../output/sam3d_rerun_fixed/overlay_diagnostic.png)
+![overlay_diagnostic](sam3d_rerun_fixed/overlay_diagnostic.png)
 
 *3D render blended at 60% opacity over the original target photo. The bottle, keyboard, and envelope align well.*
 

@@ -86,23 +86,23 @@ grown = mask | (hull_region & angle < threshold & valid_normal)
 
 Each 4-panel: normal deviation angle map | original mask + convex hull | grown mask | angle histogram.
 
-![ito_en_bottle_mask_growth](../output/sam3d_convex_hull_v3/vis/ito_en_bottle_mask_growth.png)
+![ito_en_bottle_mask_growth](sam3d_convex_hull_v3/vis/ito_en_bottle_mask_growth.png)
 
 **ito_en_bottle (+4,423px, threshold=60.0°):** Normal angle map clearly distinguishes bottle surface (green/yellow, low deviation) from background (red, high deviation). Growth fills shoulder/neck gap. Side pixels with normals >60° from front-face mean are excluded — fundamental limitation of global reference normal for curved objects.
 
-![envelope_mask_growth](../output/sam3d_convex_hull_v3/vis/envelope_mask_growth.png)
+![envelope_mask_growth](sam3d_convex_hull_v3/vis/envelope_mask_growth.png)
 
 **envelope (+761px, threshold=31.5°):** Flat rectangular surface → tight adaptive threshold. Growth fills corner gaps while correctly rejecting non-envelope hull pixels.
 
-![headphones_mask_growth](../output/sam3d_convex_hull_v3/vis/headphones_mask_growth.png)
+![headphones_mask_growth](sam3d_convex_hull_v3/vis/headphones_mask_growth.png)
 
 **headphones (+74px, threshold=60.0°):** Hull gap is only 61px — mask was already nearly convex. Same result as Sobel.
 
-![alienware_keyboard_mask_growth](../output/sam3d_convex_hull_v3/vis/alienware_keyboard_mask_growth.png)
+![alienware_keyboard_mask_growth](sam3d_convex_hull_v3/vis/alienware_keyboard_mask_growth.png)
 
 **alienware_keyboard (+1,989px, threshold=48.0°):** More aggressive than Sobel (+1,154px). Direct assignment captures concavities that the iterative dilation couldn't reach through the depth-edge ring.
 
-![green_tea_bottle_mask_growth](../output/sam3d_convex_hull_v3/vis/green_tea_bottle_mask_growth.png)
+![green_tea_bottle_mask_growth](sam3d_convex_hull_v3/vis/green_tea_bottle_mask_growth.png)
 
 **green_tea_bottle (+154px, threshold=18.8°):** Correct behavior — hull region is background/air around the contaminated shadow mask. Sobel added +5,903px of additional flat shadow surface; normal method correctly rejects them (different surface normals). The degenerate mask remains a problem but isn't made worse.
 

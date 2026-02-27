@@ -53,23 +53,23 @@ v3 replaces Sobel with **local surface normal consistency**:
 
 Each panel: normal deviation angle map | original mask + convex hull | grown mask | angle histogram
 
-![ito_en_bottle_mask_growth](../output/sam3d_convex_hull_v3/vis/ito_en_bottle_mask_growth.png)
+![ito_en_bottle_mask_growth](sam3d_convex_hull_v3/vis/ito_en_bottle_mask_growth.png)
 
 **ito_en_bottle:** +4,772px at shoulder/neck arc (threshold=60.0°). Normal angle map shows bottle surface (green/yellow) vs background (red). Growth stops at real surface boundary.
 
-![envelope_mask_growth](../output/sam3d_convex_hull_v3/vis/envelope_mask_growth.png)
+![envelope_mask_growth](sam3d_convex_hull_v3/vis/envelope_mask_growth.png)
 
 **envelope:** +727px filling corner gaps (threshold=29.0°). Flat surface → tight adaptive threshold — only true envelope surface pixels accepted.
 
-![headphones_mask_growth](../output/sam3d_convex_hull_v3/vis/headphones_mask_growth.png)
+![headphones_mask_growth](sam3d_convex_hull_v3/vis/headphones_mask_growth.png)
 
 **headphones:** Only +71px — hull gap is just 61px (mask already nearly convex). Threshold hits 60° cap.
 
-![alienware_keyboard_mask_growth](../output/sam3d_convex_hull_v3/vis/alienware_keyboard_mask_growth.png)
+![alienware_keyboard_mask_growth](sam3d_convex_hull_v3/vis/alienware_keyboard_mask_growth.png)
 
 **alienware_keyboard:** +2,129px (threshold=48.0°). Direct assignment captures concavities that iterative dilation couldn't reach.
 
-![green_tea_bottle_mask_growth](../output/sam3d_convex_hull_v3/vis/green_tea_bottle_mask_growth.png)
+![green_tea_bottle_mask_growth](sam3d_convex_hull_v3/vis/green_tea_bottle_mask_growth.png)
 
 **green_tea_bottle:** Only +209px (threshold=18.3°). Hull region normals deviate significantly from the flat mask interior — correctly rejected. The degenerate mask (shadow/table contamination) is exposed here.
 
