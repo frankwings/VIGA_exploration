@@ -8,7 +8,7 @@
 
 ## 1. Input Image
 
-![Input Image](../data/static_scene/dining/target_resized.jpg)
+![Input Image](data/static_scene/dining/target_resized.jpg)
 
 ---
 

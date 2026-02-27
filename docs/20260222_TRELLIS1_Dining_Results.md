@@ -11,7 +11,7 @@
 
 **Source:** `data/static_scene/dining/target_resized.jpg` (771 x 1024)
 
-![Input Image](../data/static_scene/dining/target_resized.jpg)
+![Input Image](data/static_scene/dining/target_resized.jpg)
 
 ---
 
