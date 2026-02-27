@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "D:\Projects\ProjectGenesis\GenesisVIGA\tools\sam3d\sam_worker.py", line 387, in <module>
+    main()
+  File "D:\Projects\ProjectGenesis\GenesisVIGA\tools\sam3d\sam_worker.py", line 301, in main
+    os.makedirs(output_dir, exist_ok=True)
+  File "C:\Users\kingy\miniconda3\envs\sam\lib\os.py", line 225, in makedirs
+    mkdir(name, mode)
+FileNotFoundError: [WinError 3] The system cannot find the path specified: ''

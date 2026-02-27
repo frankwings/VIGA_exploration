@@ -1,0 +1,29 @@
+Worker V2 Starting...
+Adapting Trellis2...
+C:\Users\kingy\miniconda3\envs\trellis2\lib\site-packages\torch\cuda\__init__.py:235: UserWarning: 
+NVIDIA GeForce RTX 5080 with CUDA capability sm_120 is not compatible with the current PyTorch installation.
+The current PyTorch install supports CUDA capabilities sm_50 sm_60 sm_61 sm_70 sm_75 sm_80 sm_86 sm_90.
+If you want to use the NVIDIA GeForce RTX 5080 GPU with PyTorch, please check the instructions at https://pytorch.org/get-started/locally/
+
+  warnings.warn(
+Traceback (most recent call last):
+  File "D:\Projects\ProjectGenesis\GenesisVIGA\tools\sam3d\adapters\trellis2_adapter.py", line 136, in __init__
+    self.pipeline = CustomTrellis2Pipeline.from_pretrained(model_name, config_file=temp_config_path)
+NameError: name 'CustomTrellis2Pipeline' is not defined
+Traceback (most recent call last):
+  File "D:\Projects\ProjectGenesis\GenesisVIGA\tools\sam3d\sam3d_worker_v2.py", line 168, in <module>
+    main()
+  File "D:\Projects\ProjectGenesis\GenesisVIGA\tools\sam3d\sam3d_worker_v2.py", line 130, in main
+    inference = Inference(model_name=args.config)
+  File "D:\Projects\ProjectGenesis\GenesisVIGA\tools\sam3d\adapters\trellis2_adapter.py", line 147, in __init__
+    raise e
+  File "D:\Projects\ProjectGenesis\GenesisVIGA\tools\sam3d\adapters\trellis2_adapter.py", line 136, in __init__
+    self.pipeline = CustomTrellis2Pipeline.from_pretrained(model_name, config_file=temp_config_path)
+NameError: name 'CustomTrellis2Pipeline' is not defined
+[SPARSE] Conv backend: flex_gemm; Attention backend: flash_attn
+Warning: trellis2 package not found or import failed: No module named 'trellis2.utils.postprocessing_utils'
+Loading TRELLIS.2 model: microsoft/TRELLIS.2-4B...
+Patching pipeline config to use DummyBiRefNet...
+Using modified config at: C:\Users\kingy\AppData\Local\Temp\tmp0jny97pt.json
+Error initializing custom pipeline: name 'CustomTrellis2Pipeline' is not defined. Aborting.
+ERROR IN WORKER:

@@ -1,0 +1,56 @@
+"""Blender script for static scene generator using EEVEE (fast iteration rendering)."""
+import bpy
+import os
+import sys
+
+if __name__ == "__main__":
+
+    code_fpath = sys.argv[6]  # Path to the code file
+    if len(sys.argv) > 7:
+        rendering_dir = sys.argv[7] # Path to save the rendering from camera1
+    else:
+        rendering_dir = None
+    if len(sys.argv) > 8:
+        save_blend = sys.argv[8] # Path to save the blend file
+    else:
+        save_blend = None
+
+    # Read and execute the code from the specified file
+    with open(code_fpath, "r") as f:
+        code = f.read()
+    try:
+        exec(code)
+    except:
+        raise ValueError
+
+    if not rendering_dir:
+        print("[INFO] No rendering directory provided, skipping rendering.")
+        exit(0)
+
+    # Use EEVEE for fast iteration rendering
+    if bpy.app.version >= (4, 0, 0):
+        bpy.context.scene.render.engine = 'BLENDER_EEVEE_NEXT'
+    else:
+        bpy.context.scene.render.engine = 'BLENDER_EEVEE'
+
+    # Setting up rendering resolution
+    bpy.context.scene.render.resolution_x = 512
+    bpy.context.scene.render.resolution_y = 512
+
+    # Set color mode to RGB
+    bpy.context.scene.render.image_settings.color_mode = 'RGB'
+
+    # render from all the camera, save the rendering to the rendering_dir
+    for camera in bpy.data.objects:
+        if camera.type == 'CAMERA':
+            bpy.context.scene.camera = camera
+            bpy.context.scene.render.image_settings.file_format = 'PNG'
+            bpy.context.scene.render.filepath = os.path.join(rendering_dir, f'{camera.name}.png')
+            bpy.ops.render.render(write_still=True)
+
+    # Save the blend file
+    if save_blend:
+        # Set the save version to 0
+        bpy.context.preferences.filepaths.save_version = 0
+        # Save the blend file
+        bpy.ops.wm.save_as_mainfile(filepath=save_blend)

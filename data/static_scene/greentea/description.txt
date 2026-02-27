@@ -1,0 +1,1 @@
+A still life scene with 5 objects: a table, an ITO EN green tea bottle, an Alienware keyboard, a pair of headphones, and an envelope. Import all 5 objects from their GLB files and display them clearly on the table.
